@@ -44,15 +44,12 @@ BiocManager::install(c("clusterProfiler", "org.Mm.eg.db", "ComplexHeatmap"))
 # Install CellChat from GitHub
 devtools::install_github("jinworks/CellChat")
 
-Repository Structure
-├── data/                  # Input data (not included, see Data Access)
-├── scripts/
-│   ├── figure1_cell_annotation.R
-│   ├── figure2_hepatocyte_zonation.R
-│   ├── figure3_hsc_activation.R
-│   ├── figure4_cellchat_communication.R
-│   └── figure5_therapeutic_targets.R
-├── results/               # Output figures and tables
-├── README.md
-└── LICENSE
+liver-fibrosis-scRNAseq/
+├── README.md                    # 项目说明（必需）
+├── LICENSE                      # 许可证（建议MIT）
+├── .gitignore                   # 忽略临时文件
+├── main_analysis.R              # 主分析代码（您上传的代码1）
+├── run_cellchat_analysis.R      # CellChat分析（您上传的代码2）
+└── data/                        # 数据目录（空，仅说明）
+    └── README.md                # 数据获取说明
 
