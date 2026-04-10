@@ -49,10 +49,7 @@ create_cellchat_object <- function(seurat_obj, group_name) {
     row.names = colnames(seurat_obj)
   )
   
-  # 创建对象
-  cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels")
-  cellchat <- addMeta(cellchat, meta = meta)
-  cellchat <- setIdent(cellchat, ident.use = "labels")
+ 
   
   # 设置数据库
   cellchat@DB <- CellChatDB.mouse
