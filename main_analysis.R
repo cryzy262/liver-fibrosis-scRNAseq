@@ -1,12 +1,11 @@
-# ==================== 完整单细胞分析流程 v4.0(修复版)====================
-# 修复: 路径转义问题、正则表达式语法
+# ==================== Complete Single-Cell Analysis Workflow v4.0====================
 
-# ==================== 0. 环境设置 ====================
+# ==================== 0. Environment Configuration ====================
 work.dir <- "D:/文章/生信分析/小鼠肝脏单细胞RNA测序分析/20260325"
 set.seed(2025)
 setwd(work.dir)
 
-# 创建目录
+# Create Directory
 dirs.to.create <- file.path(work.dir, c(
   "data", "results", 
   "results/1_quality_control", 
@@ -24,7 +23,7 @@ data.dir <- file.path(work.dir, "data")
 hep_figures_dir <- file.path(figures.dir, "hepatocytes")
 hep_tables_dir <- file.path(tables.dir, "hepatocytes")
 
-# 加载包
+# Load Packages
 packages <- c("Seurat", "ggplot2", "dplyr", "patchwork", "cowplot", "hdf5r",
               "clusterProfiler", "org.Mm.eg.db", "enrichplot", "DOSE",
               "msigdbr", "fgsea", "pheatmap", "magick", "gridExtra", 
@@ -48,7 +47,7 @@ for(pkg in packages) {
   suppressMessages(library(pkg, character.only = TRUE))
 }
 
-# 修复命名空间
+# Fix Namespace
 select <- dplyr::select
 filter <- dplyr::filter
 mutate <- dplyr::mutate
@@ -58,7 +57,7 @@ group_by <- dplyr::group_by
 summarise <- dplyr::summarise
 pull <- dplyr::pull
 
-# 主题
+# Theme Setting
 theme_journal <- theme_bw(base_size = 12) +      
   theme(
     plot.title = element_text(hjust = 0.5, size = rel(1.1), face = "bold"),
@@ -70,19 +69,19 @@ theme_journal <- theme_bw(base_size = 12) +
     panel.grid.minor = element_blank()
   )
 
-cat("=== 环境初始化完成 ===\n")
+cat("===Environment initialization completed ===\n")
 
-# ==================== 1. 数据读取与QC ====================
-cat("\n=== 步骤1: 读取h5格式数据与质量控制 ===\n")
+# ==================== 1. Data Loading and QC ====================
+cat("\n=== Step 1: Reading h5 format data and quality control ===\n")
 
 rdata_file <- file.path(work.dir, "results", "2_analysis", "high_quality_cells_v4.RData")
 
 if(file.exists(rdata_file)) {
-  cat("发现已处理的Seurat对象，加载中...\n")
+  cat("Processed Seurat object detected, loading...\n")
   load(rdata_file)
-  cat(sprintf("✓ 加载完成，共%d个细胞\n", ncol(high_quality_cells)))
+  cat(sprintf("✓ Loading complete, %d cells in total\n", ncol(high_quality_cells)))
 } else {
-  # 查找h5文件 - 使用正确的正则表达式
+  # Searching for h5 files 
   h5_files <- list.files(data.dir, pattern = "\\.h5$", recursive = TRUE, full.names = TRUE)
   
   if(length(h5_files) == 0) {
@@ -90,20 +89,20 @@ if(file.exists(rdata_file)) {
   }
   
   if(length(h5_files) == 0) {
-    stop("错误: 在", data.dir, "中未找到h5文件")
+    stop("Error: ", data.dir, "No h5 files found in")
   }
   
-  cat(sprintf("发现 %d 个h5文件:\n", length(h5_files)))
+  cat(sprintf("%d h5 file(s) detected:\n", length(h5_files)))
   print(basename(h5_files))
   
-  # 读取h5文件
+  # Reading h5 file 
   seurat_list <- list()
   
   for(i in 1:length(h5_files)) {
     file_path <- h5_files[i]
     sample_name <- tools::file_path_sans_ext(basename(file_path))
     
-    cat(sprintf("\n  读取样本 %d/%d: %s\n", i, length(h5_files), sample_name))
+    cat(sprintf("\n  reading sample %d/%d: %s\n", i, length(h5_files), sample_name))
     
     counts <- tryCatch({
       Read10X_h5(file_path)
@@ -120,16 +119,16 @@ if(file.exists(rdata_file)) {
         } else if("matrix" %in% names(h5file)) {
           h5file[["matrix"]]
         } else {
-          stop("无法识别h5文件格式")
+          stop("Unrecognized h5 file format")
         }
       }, error = function(e2) {
-        # 使用正确的正则表达式匹配
+        
         if(grepl("\\.h5ad$", file_path)) {
           Convert(file_path, dest = "h5seurat", overwrite = TRUE)
           h5seurat_path <- sub("\\.h5ad$", ".h5seurat", file_path)
           LoadH5Seurat(h5seurat_path)
         } else {
-          stop("无法读取h5文件: ", conditionMessage(e2))
+          stop("Failed to read h5 file: ", conditionMessage(e2))
         }
       })
     })
@@ -139,56 +138,56 @@ if(file.exists(rdata_file)) {
     seurat_list[[i]] <- seu
   }
   
-  # 合并
+  # merging
   if(length(seurat_list) > 1) {
-    cat("\n合并多个样本...\n")
+    cat("\nMerging multiple samples...\n")
     high_quality_cells <- merge(seurat_list[[1]], y = seurat_list[-1], 
                                 add.cell.ids = sapply(seurat_list, function(x) x$sample[1]))
   } else {
     high_quality_cells <- seurat_list[[1]]
   }
   
-  # 添加分组信息
+  # Adding group information
   high_quality_cells$group <- ifelse(grepl("Ctrl|Control|WT|wildtype|normal", 
                                            high_quality_cells$sample, ignore.case = TRUE), 
                                      "Control", "CCl4")
   
-  cat(sprintf("\n原始细胞数: %d\n", ncol(high_quality_cells)))
-  cat("样本分组:\n")
+  cat(sprintf("\nInitial cell count: %d\n", ncol(high_quality_cells)))
+  cat("sample group:\n")
   print(table(high_quality_cells$sample, high_quality_cells$group))
   
   # QC
-  cat("\n进行质量控制...\n")
+  cat("\nPerforming quality control...\n")
   high_quality_cells[["percent.mt"]] <- PercentageFeatureSet(high_quality_cells, pattern = "^mt-")
   high_quality_cells[["percent.rb"]] <- PercentageFeatureSet(high_quality_cells, pattern = "^Rp[sl]")
   
-  # 严格QC
-  cat("过滤标准: nFeature 200-6000, nCount 500-50000, percent.mt < 25%\n")
+  # strict QC
+  cat("Filtering criteria: nFeature 200-6000, nCount 500-50000, percent.mt < 25%\n")
   high_quality_cells <- subset(high_quality_cells, 
                                subset = nFeature_RNA > 200 & nFeature_RNA < 6000 &
                                  nCount_RNA > 500 & nCount_RNA < 50000 &
                                  percent.mt < 25)
   
-  cat(sprintf("QC后细胞数: %d (保留率: %.1f%%)\n", 
+  cat(sprintf("Post-QC cell count: %d (Retention rate: %.1f%%)\n", 
               ncol(high_quality_cells), 
               100 * ncol(high_quality_cells) / sum(sapply(seurat_list, ncol))))
   
-  # 标准化
-  cat("标准化和数据缩放...\n")
+  # normalization
+  cat("Normalization and Data Scaling...\n")
   high_quality_cells <- NormalizeData(high_quality_cells)
   high_quality_cells <- FindVariableFeatures(high_quality_cells, selection.method = "vst", nfeatures = 2000)
   high_quality_cells <- ScaleData(high_quality_cells)
   high_quality_cells <- RunPCA(high_quality_cells, features = VariableFeatures(object = high_quality_cells))
   
   save(high_quality_cells, file = rdata_file)
-  cat("✓ 数据读取和QC完成，对象已保存\n")
+  cat("✓ data reading and QC completed，Object has been saved\n")
 }
 
-# ==================== 2. 降维与聚类 ====================
-cat("\n=== 步骤2: 降维与聚类 ===\n")
+# ==================== 2. Dimensionality Reduction and Clustering ====================
+cat("\n=== step 2: Dimensionality Reduction and Clustering ===\n")
 
 if(!"seurat_clusters" %in% colnames(high_quality_cells@meta.data)) {
-  cat("运行UMAP和聚类...\n")
+  cat("running UMAP and clustering...\n")
   
   high_quality_cells <- JoinLayers(high_quality_cells)
   high_quality_cells <- FindNeighbors(high_quality_cells, dims = 1:20)
@@ -202,36 +201,44 @@ if(!"seurat_clusters" %in% colnames(high_quality_cells@meta.data)) {
   
   p_combined <- p_umap1 + p_umap2
   ggsave(file.path(figures.dir, "Figure1_UMAP.tiff"), p_combined, width = 12, height = 5, dpi = 300)
+  ggsave(file.path(figures.dir, "Figure1_UMAP.pdf"), p_combined, width = 12, height = 5, device = cairo_pdf)
   
-  cat(sprintf("✓ 聚类完成，发现 %d 个cluster\n", length(unique(high_quality_cells$seurat_clusters))))
+  cat(sprintf("✓ clustering completed，found %d cluster\n", length(unique(high_quality_cells$seurat_clusters))))
 } else {
-  cat("✓ 使用已有聚类结果\n")
+  cat("✓ Using existing clustering results\n")
 }
 
 
-# ==================== 3. 细胞类型注释(Figure 1C)====================
+# ==================== 3. Cell Type Annotation (Figure 1C)====================
 cat("
-=== 步骤3: 细胞类型注释 ===
+=== step 3: Cell Type Annotation ===
 ")
 
 if(!"celltype" %in% colnames(high_quality_cells@meta.data) || 
    sum(grepl("^Cluster_", high_quality_cells$celltype)) > 5) {
   
-  cat("基于标志物进行细胞注释...
+  cat("Cell annotation based on marker genes...
 ")
   
   if (length(Layers(high_quality_cells)) > 1) {
     high_quality_cells <- JoinLayers(high_quality_cells)
   }
   
-  # 扩展的标志物列表
+  # Extended marker list
   liver_markers <- list(
-    "Hepatocyte" = c("Alb", "Ttr", "Apoa1", "Cyp3a11", "Fabp1", "Ass1", "Serpina1a", "Cyp2e1"),
-    "HSC" = c("Lrat", "Des", "Vim", "Pdgfrb", "Acta2", "Col1a1", "Col1a2", "Dcn", "Gfap", "S100a4", "Thy1"),
-   
+    "Hepatocyte" = c("Alb", "Ttr", "Ass1", "Serpina1a", "Cyp2e1"),
+    "HSC" = c("Lrat", "Des", "Vim", "Pdgfrb", "Acta2", "Col1a1",  "Gfap", "S100a4", "Thy1"),
+    "Endothelial" = c("Pecam1", "Cdh5", "Vwf", "Eng", "Stab2", "Kdr", "Tek", "Cldn5", "Flt1", "Nrp2"),
+    "Kupffer" = c("Adgre1", "Cd68", "Cd163", "Marco", "Cd5l", "Vsig4"),
+    "Monocyte" = c("Ly6c2",  "Fn1", "Csf1r"),
+    "Cholangiocyte" = c("Krt19","Epcam", "Anxa4", "Krt8", "Cftr"),
+    "NK_T" = c("Cd3e", "Nkg7", , "Klrb1c"),
+    "B_cell" = c("Cd79a", "Cd79b", "Ms4a1", "Cd19", "Ighm", "Cd74", "Ebf1"),
+    "Plasma_cell" = c("Jchain", "Mzb1", "Igkc", "Ighg1", "Igha1", "Sdc1"),
+    "Neutrophil" = c("S100a8", "S100a9", "G0s2",  "Csf3r", "Lcn2")
   )
   
-  # 计算模块评分
+  # Computing module scores
   for(celltype in names(liver_markers)) {
     genes <- liver_markers[[celltype]]
     genes <- genes[genes %in% rownames(high_quality_cells)]
@@ -244,7 +251,7 @@ if(!"celltype" %in% colnames(high_quality_cells@meta.data) ||
     }
   }  
   
-  # 改进的注释函数
+  # Improved annotation function
   cluster_annotation <- function(seu_obj) {
     if (length(Layers(seu_obj)) > 1) {
       seu_obj <- JoinLayers(seu_obj)
@@ -313,11 +320,7 @@ if(!"celltype" %in% colnames(high_quality_cells@meta.data) ||
         assigned <- TRUE
       }
       # B cell
-      else if(sum(c("Cd79a", "Cd79b", "Ms4a1", "Cd19", "Ighm", "Ebf1") %in% cl_markers) >= 2) {
-        celltypes[cluster_ids == cl] <- "B_cell"
-        assigned <- TRUE
-      }
-      # Plasma cell
+     # Plasma cell
       else if(sum(c("Jchain", "Mzb1", "Igkc", "Ighg1", "Sdc1") %in% cl_markers) >= 2) {
         celltypes[cluster_ids == cl] <- "Plasma_cell"
         assigned <- TRUE
@@ -328,7 +331,7 @@ if(!"celltype" %in% colnames(high_quality_cells@meta.data) ||
         assigned <- TRUE
       }
       
-      # 模块评分法回退
+      # Fallback to module scoring method
       if(!assigned) {
         cells_in_cl <- WhichCells(seu_obj, idents = cl)
         score_cols <- c("Hepatocyte1", "HSC1", "Endothelial1", "Kupffer1", 
@@ -387,10 +390,10 @@ if(!"celltype" %in% colnames(high_quality_cells@meta.data) ||
     return(celltypes)
   }
   
-  # 执行注释
+  # Executing annotation
   high_quality_cells$celltype <- cluster_annotation(high_quality_cells)
   
-  # 可视化
+  # Visualization
   p_anno <- DimPlot(high_quality_cells, reduction = "umap", group.by = "celltype", 
                     label = TRUE, pt.size = 0.5, repel = TRUE) +
     ggtitle("C. Cell Types") + 
@@ -399,22 +402,24 @@ if(!"celltype" %in% colnames(high_quality_cells@meta.data) ||
   
   ggsave(file.path(figures.dir, "Figure1_CellType.tiff"), 
          p_anno, width = 12, height = 8, dpi = 300)
+  ggsave(file.path(figures.dir, "Figure1_CellType.pdf"), 
+         p_anno, width = 12, height = 8, device = cairo_pdf)
   
-  cat("✓ 细胞注释完成
+  cat("✓ Cell annotation completed
 ")
   print(table(high_quality_cells$celltype))
   
 } else {
-  cat("✓ 使用已有注释
+  cat("✓ Using existing annotations
 ")
 }
 
-# ==================== 4. HSC亚群分类(v2.5标准)====================
+# ==================== 4. HSC Subpopulation Classification (v2.5)====================
 cat("
 ")
 cat(paste(rep("=", 70), collapse = ""), "
 ")
-cat("              HSC亚群细分类(平衡标准 v2.5 - 65%分位数)
+cat("              HSCSubpopulation Classification (v2.5 - 65th percentile)
 ")
 cat(paste(rep("=", 70), collapse = ""), "
 ")
@@ -422,13 +427,13 @@ cat(paste(rep("=", 70), collapse = ""), "
 hsc_cells <- subset(high_quality_cells, celltype == "HSC")
 
 if(ncol(hsc_cells) == 0) {
-  stop("错误: 未找到HSC细胞")
+  stop("Error: HSC cells not found")
 }
 
-cat(sprintf("提取到 %d 个HSC细胞
+cat(sprintf("Extracted %d HSC cells
 ", ncol(hsc_cells)))
 
-# 重新计算活化评分
+# Recalculating activation score
 activation_genes <- c("Acta2", "Col1a1", "Col1a2", "Col3a1", "Timp1", "Lox", "Spp1", 
                       "Postn", "Tagln", "Thbs1", "Cthrc1", "Vim", "Fn1", "Tgfb1")
 activation_genes <- activation_genes[activation_genes %in% rownames(hsc_cells)]
@@ -437,9 +442,9 @@ if(length(activation_genes) >= 3) {
   hsc_cells <- AddModuleScore(hsc_cells, features = list(activation_genes), name = "Activation")
   hsc_cells$act_score <- hsc_cells$Activation1
   
-  # v2.5平衡标准: 65%分位数 + Acta2>0.2
+  # v2.5: 65th percentile + Acta2>0.2
   act_threshold <- quantile(hsc_cells$act_score, 0.65, na.rm = TRUE)
-  cat(sprintf("活化评分阈值 (65%%分位数): %.3f
+  cat(sprintf("Activation score threshold (65th percentile): %.3f
 ", act_threshold))
   
   if("Acta2" %in% rownames(hsc_cells)) {
@@ -452,7 +457,7 @@ if(length(activation_genes) >= 3) {
     hsc_cells$hsc_subtype <- ifelse((high_score & high_acta2) | very_high_score, 
                                     "HSC_Act", "HSC_Qui")
     
-    cat(sprintf("Acta2>0.2细胞: %d/%d (%.1f%%)
+    cat(sprintf("Acta2>0.2 cell: %d/%d (%.1f%%)
 ", 
                 sum(high_acta2), ncol(hsc_cells), 100*sum(high_acta2)/ncol(hsc_cells)))
     
@@ -461,14 +466,14 @@ if(length(activation_genes) >= 3) {
                                     "HSC_Act", "HSC_Qui")
   }
   
-  # 检查分类结果
+  # Checking classification results
   subtype_table <- table(hsc_cells$hsc_subtype, hsc_cells$group)
   cat("
-HSC亚群分布(v2.5平衡标准):
+HSC subtype distribution (v2.5):
 ")
   print(subtype_table)
   
-  # 计算比例
+  # Calculating proportions
   ccl4_total <- sum(hsc_cells$group == "CCl4")
   ctrl_total <- sum(hsc_cells$group == "Control")
   ccl4_act <- sum(hsc_cells$hsc_subtype == "HSC_Act" & hsc_cells$group == "CCl4")
@@ -479,36 +484,31 @@ HSC亚群分布(v2.5平衡标准):
   cat(sprintf("  Control组: %d/%d (%.1f%%)
 ", ctrl_act, ctrl_total, 100*ctrl_act/ctrl_total))
   
-  # 更新主对象 - 修复: 确保hsc_subtype被添加到high_quality_cells
+  # Updating main object - Fix: Ensure hsc_subtype is added to high_quality_cells
   hsc_meta <- data.frame(
     cell = colnames(hsc_cells),
     hsc_subtype = hsc_cells$hsc_subtype,
     stringsAsFactors = FALSE
   )
   
-  # 初始化celltype_reannotated列(如果还没有的话)
-  if(!"celltype_reannotated" %in% colnames(high_quality_cells@meta.data)) {
-    high_quality_cells$celltype_reannotated <- as.character(high_quality_cells$celltype)
-  }
-  
   match_idx <- match(hsc_meta$cell, colnames(high_quality_cells))
   valid_idx <- !is.na(match_idx)
   high_quality_cells$celltype_reannotated[match_idx[valid_idx]] <- hsc_meta$hsc_subtype[valid_idx]
   
-  # 关键修复: 同时将hsc_subtype添加为独立列，供后续使用
+  # Key fix: Simultaneously adding hsc_subtype as an independent column for future reference
   high_quality_cells$hsc_subtype <- NA
   high_quality_cells$hsc_subtype[match_idx[valid_idx]] <- hsc_meta$hsc_subtype[valid_idx]
   
-  cat(sprintf("\n✓ HSC分类v2.5完成，已更新 %d 个细胞\n", sum(valid_idx)))
+  cat(sprintf("\n✓ HSCClassification v2.5 completed，Updated %d cells \n", sum(valid_idx)))
 } else {
-  cat("警告: 活化标志物基因不足，跳过HSC亚型分类
+  cat("Warning: Insufficient activation marker genes, skipping HSC subtype classification
 ")
 }
 
 
-# ==================== 5. 纤维化评分 ====================
+# ==================== 5. Fibrosis Score ====================
 cat("
-=== 步骤5: 计算纤维化评分 ===
+=== step 5: Caculating Fibrosis Score ===
 ")
 
 fibrosis_genes <- c(
@@ -526,7 +526,7 @@ fibrosis_genes <- c(
 fibrosis_genes <- fibrosis_genes[fibrosis_genes %in% rownames(high_quality_cells)]
 
 if(length(fibrosis_genes) >= 5) {
-  cat(sprintf("使用 %d 个纤维化相关基因计算评分
+  cat(sprintf("Using %d fibrosis-related genes to calculate score
 ", length(fibrosis_genes)))
   
   high_quality_cells <- AddModuleScore(
@@ -535,7 +535,7 @@ if(length(fibrosis_genes) >= 5) {
     name = "Fibrosis_Score"
   )
   
-  # 可视化
+  # visualization
   p_score1 <- FeaturePlot(high_quality_cells, 
                           features = "Fibrosis_Score1",
                           pt.size = 0.3,
@@ -548,7 +548,7 @@ Score"
     labs(title = "Fibrosis Score") +
     theme_journal
   
-  # HSC亚型小提琴图
+  # HSCSubtype Violin Plot
   hsc_cells_idx <- which(high_quality_cells$celltype_reannotated %in% c("HSC_Qui", "HSC_Act"))
   
   if(length(hsc_cells_idx) > 0) {
@@ -584,22 +584,24 @@ Score"
     p_combined <- p_score1 / p_score2
     ggsave(file.path(figures.dir, "Figure2_Fibrosis_Score.tiff"), 
            p_combined, width = 8, height = 10, dpi = 300)
-    cat("✓ 纤维化评分图已保存
+    ggsave(file.path(figures.dir, "Figure2_Fibrosis_Score.pdf"), 
+           p_combined, width = 8, height = 10, device = cairo_pdf)
+    cat("✓ Fibrosis score plot saved
 ")
   }
   
-  cat("✓ 纤维化评分完成
+  cat("✓ Fibrosis score plot completed
 ")
 } else {
-  cat("警告: 纤维化基因不足，跳过评分
+  cat("Warning: Insufficient fibrosis genes, skipping scoring
 ")
 }
 
 save(high_quality_cells, file = rdata_file)
 
-# ==================== 6. 差异基因分析(CCl4组内 HSC_Act vs HSC_Qui)====================
+# ========= 6. Differential Gene Expression Analysis (HSC_Act vs HSC_Qui within CCl4 group)==========
 cat("
-=== 步骤6: 差异基因分析(CCl4组内 HSC_Act vs HSC_Qui)===
+=== step 6: Differential Gene Expression Analysis (CCl4 Within-group HSC_Act vs HSC_Qui)===
 ")
 
 hsc_ccl4 <- subset(high_quality_cells, 
@@ -607,10 +609,10 @@ hsc_ccl4 <- subset(high_quality_cells,
                      celltype_reannotated %in% c("HSC_Act", "HSC_Qui"))
 
 if(ncol(hsc_ccl4) == 0) {
-  stop("错误: 未找到CCl4组的HSC细胞")
+  stop("Error: No HSC cells found in CCl4 group")
 }
 
-cat(sprintf("CCl4组HSC细胞: HSC_Act=%d, HSC_Qui=%d
+cat(sprintf("CCl4 group HSC cells: HSC_Act=%d, HSC_Qui=%d
 ",
             sum(hsc_ccl4$celltype_reannotated == "HSC_Act"),
             sum(hsc_ccl4$celltype_reannotated == "HSC_Qui")))
@@ -618,9 +620,9 @@ cat(sprintf("CCl4组HSC细胞: HSC_Act=%d, HSC_Qui=%d
 hsc_ccl4 <- JoinLayers(hsc_ccl4)
 Idents(hsc_ccl4) <- "celltype_reannotated"
 
-# 主分析: HSC_Act vs HSC_Qui
+# Main Analysis: HSC_Act vs HSC_Qui
 cat("
-【主分析】HSC_Act vs HSC_Qui(CCl4组内)...
+【Main Analysis】HSC_Act vs HSC_Qui(CCl4 Within-group)...
 ")
 hsc_deg_ccl4 <- FindMarkers(
   hsc_ccl4,
@@ -645,17 +647,17 @@ hsc_deg_ccl4_df <- hsc_deg_ccl4 %>%
 write.csv(hsc_deg_ccl4_df, file.path(tables.dir, "Table_DEG_HSC_Act_vs_Qui_CCl4.csv"), row.names = FALSE)
 
 cat(sprintf("
-✓ 主分析完成: 共%d个DEG (padj<0.05)
+✓ Main analysis completed: %d DEGs identified (padj<0.05)
 ", 
             sum(hsc_deg_ccl4_df$p_val_adj < 0.05)))
 
-# 保存供后续使用
+# Saved for subsequent use
 hsc_deg <- hsc_deg_ccl4_df
 
-# ==================== 7. 通路富集分析与Figure 1生成 ====================
-cat("\n=== 步骤7: 通路富集分析 ===\n")
+# ==================== 7. Pathway Enrichment Analysis and Figure 1 Generation ====================
+cat("\n=== step 7: Pathway Enrichment Analysis ===\n")
 
-# 确保dplyr已加载(用于管道操作)
+# Ensure dplyr is loaded (for pipe operations)
 if(!require("dplyr", quietly = TRUE)) {
   install.packages("dplyr")
   library(dplyr)
@@ -676,10 +678,10 @@ down_genes <- hsc_deg_unique %>%
   arrange(avg_log2FC) %>%
   pull(gene)
 
-cat(sprintf("分析基因: 上调%d个，下调%d个\n", length(up_genes), length(down_genes)))
+cat(sprintf("Gene analysis: %d upregulated，%d downregulated\n", length(up_genes), length(down_genes)))
 
-# GO分析
-cat("GO富集分析...\n")
+# GOanalysis
+cat("GO Enrichment Analysis...\n")
 ego_bp_up <- NULL
 ego_mf_up <- NULL
 
@@ -691,14 +693,14 @@ if(length(up_genes) >= 10) {
     ego_mf_up <- enrichGO(gene = up_genes, OrgDb = org.Mm.eg.db, keyType = "SYMBOL",
                           ont = "MF", pAdjustMethod = "BH", pvalueCutoff = 0.05)
     
-    cat(sprintf("  GO BP: %d个条目\n", ifelse(is.null(ego_bp_up), 0, nrow(ego_bp_up@result))))
+    cat(sprintf("  GO BP: %d \n", ifelse(is.null(ego_bp_up), 0, nrow(ego_bp_up@result))))
   }, error = function(e) {
-    cat("  GO分析错误:", conditionMessage(e), "\n")
+    cat("  GO Analysis Error:", conditionMessage(e), "\n")
   })
 }
 
-# KEGG分析
-cat("KEGG富集分析...\n")
+# KEGG analysis
+cat("KEGG enrichment analysis...\n")
 kk_up <- NULL
 
 if(length(up_genes) >= 10) {
@@ -707,10 +709,10 @@ if(length(up_genes) >= 10) {
     
     if(nrow(gene_df_up) > 0) {
       kk_up <- enrichKEGG(gene = gene_df_up$ENTREZID, organism = 'mmu', pvalueCutoff = 0.05)
-      cat(sprintf("  找到%d个KEGG通路\n", nrow(kk_up@result)))
+      cat(sprintf("  %d KEGG pathways identified\n", nrow(kk_up@result)))
     }
   }, error = function(e) {
-    cat("  KEGG分析失败:", conditionMessage(e), "\n")
+    cat("  KEGG Analysis Failed:", conditionMessage(e), "\n")
   })
 }
 
@@ -721,16 +723,16 @@ if(!is.null(kk_up)) {
   write.csv(kk_up@result, file.path(tables.dir, "Table_KEGG_Up.csv"), row.names = FALSE)
 }
 
-cat("✓ 富集分析完成\n")
+cat("✓ Enrichment analysis completed \n")
 
-# ==================== Figure 1: 细胞类型注释与HSC纤维化特征 ====================
-cat("\n=== 生成 Figure 1: 细胞类型注释与HSC纤维化特征 ===\n")
+# =========== Figure 1: Cell Type Annotation and HSC Fibrosis Characteristics ==============
+cat("\n=== Generating Figure 1: Cell Type Annotation and HSC Fibrosis Characteristics ===\n")
 
-# 加载需要的包
+# Loading required packages
 if(!require("tidyr", quietly = TRUE)) install.packages("tidyr")
 library(tidyr)
 
-# 定义颜色方案
+# Defining color scheme
 celltype_colors <- c(
   "Hepatocyte" = "#E41A1C", 
   "LSEC" = "#377EB8", 
@@ -751,16 +753,16 @@ celltype_colors <- c(
   "HSC" = "#FFFF33"
 )
 
-# 确保celltype_reannotated存在且为因子
+# Ensuring celltype_reannotated exists and is a factor
 if(!"celltype_reannotated" %in% colnames(high_quality_cells@meta.data)) {
   high_quality_cells$celltype_reannotated <- as.character(high_quality_cells$celltype)
 }
 
-# 获取实际的细胞类型水平
+# Retrieving actual cell type levels
 actual_celltypes <- unique(high_quality_cells$celltype_reannotated)
 available_colors <- celltype_colors[names(celltype_colors) %in% actual_celltypes]
 
-# 为未定义颜色的细胞类型分配灰色
+# Assigning gray color to undefined cell types
 missing_types <- setdiff(actual_celltypes, names(celltype_colors))
 if(length(missing_types) > 0) {
   for(mt in missing_types) {
@@ -780,13 +782,13 @@ p1a <- DimPlot(high_quality_cells, reduction = "umap", group.by = "celltype_rean
   ggtitle("A. Cell Type Annotation") + 
   theme_journal
 
-# 1B: 细胞组成(排除双细胞，按比例从高到低排列)
+# 1B: Cell Composition (excluding doublets, sorted by proportion from high to low)
 final_stats <- as.data.frame(table(high_quality_cells$celltype_reannotated))
 final_stats <- final_stats[!final_stats$Var1 %in% c("Doublet_or_Debris", "NA"), ]
 colnames(final_stats) <- c("CellType", "Count")
 final_stats$Percentage <- round(final_stats$Count / sum(final_stats$Count) * 100, 1)
 
-# 按Count从高到低排序
+# Sorted by Count in descending order
 final_stats <- final_stats[order(-final_stats$Count), ]
 final_stats$CellType <- factor(final_stats$CellType, levels = final_stats$CellType)
 
@@ -799,7 +801,7 @@ p1b <- ggplot(final_stats, aes(x = CellType, y = Count, fill = CellType)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1), 
         legend.position = "none")
 
-# 1C: 分组比较
+# 1C: Group Comparison
 group_stats <- table(high_quality_cells$celltype_reannotated, high_quality_cells$group)
 group_stats <- group_stats[!rownames(group_stats) %in% c("Doublet_or_Debris", "NA"), ]
 group_props <- prop.table(group_stats, margin = 2) * 100
@@ -812,18 +814,18 @@ p1c <- ggplot(plot_data_grp, aes(x = Group, y = Percentage, fill = CellType)) +
   labs(x = "Group", y = "Percentage (%)", title = "C. Composition by Group") +
   theme_journal
 
-# 1D: 纤维化评分(使用已计算的或重新计算)
+# 1D: Fibrosis Score (using pre-computed or recalculating)
 if(!"Fibrosis_Score1" %in% colnames(high_quality_cells@meta.data)) {
   fibrosis_genes <- c("Col1a1", "Col1a2", "Acta2", "Des", "Vim", "Tgfb1")
   fibrosis_genes <- fibrosis_genes[fibrosis_genes %in% rownames(high_quality_cells)]
   if(length(fibrosis_genes) >= 3) {
     high_quality_cells <- AddModuleScore(high_quality_cells, features = list(fibrosis_genes), 
                                          name = "Fibrosis_Score")
-    cat(sprintf("  计算纤维化评分(%d个基因)\n", length(fibrosis_genes)))
+    cat(sprintf("  Calculating fibrosis score (%d genes )\n", length(fibrosis_genes)))
   }
 }
 
-# 选择要显示的细胞类型(优先使用HSC分类，如果没有则使用原始HSC)
+# Selecting cell types to display (prioritizing HSC subtypes, falling back to original HSC if unavailable)
 hsc_types <- c("HSC_Act", "HSC_Qui")
 if(!any(hsc_types %in% actual_celltypes)) {
   hsc_types <- "HSC"
@@ -853,7 +855,7 @@ if(length(display_types) > 0 && "Fibrosis_Score1" %in% colnames(high_quality_cel
     theme_void() + ggtitle("D. Fibrogenic Capacity")
 }
 
-# 1E: 富集倍数计算
+# 1E: Fold Enrichment Calculation
 fibrosis_genes_for_enrich <- c("Col1a1", "Col1a2", "Acta2", "Des", "Vim", "Tgfb1")
 fibrosis_genes_for_enrich <- fibrosis_genes_for_enrich[fibrosis_genes_for_enrich %in% rownames(high_quality_cells)]
 
@@ -883,7 +885,7 @@ if(length(display_types) > 0 && length(fibrosis_genes_for_enrich) > 0) {
         labs(y = "Fold Enrichment (vs Hepatocyte)", x = "", title = "E. Fibrosis Gene Enrichment") +
         theme_journal + theme(legend.position = "none", axis.text.x = element_text(angle = 30, hjust = 1))
       
-      # 保存富集倍数数据
+      # Saving fold enrichment data
       write.csv(fold_df, file.path(tables.dir, "Table_Fibrosis_Enrichment.csv"), row.names = FALSE)
     } else {
       p1e <- ggplot() + annotate("text", x = 0.5, y = 0.5, label = "No enrichment data") + 
@@ -898,7 +900,7 @@ if(length(display_types) > 0 && length(fibrosis_genes_for_enrich) > 0) {
     theme_void() + ggtitle("E. Fibrosis Gene Enrichment")
 }
 
-# 1F: HSC Marker对比(仅当有HSC分类时)
+# 1F: HSC Marker Comparison (only when HSC subtypes are available)
 hsc_marker_types <- intersect(c("HSC_Act", "HSC_Qui", "HSC"), actual_celltypes)
 
 if(length(hsc_marker_types) > 0) {
@@ -911,7 +913,7 @@ if(length(hsc_marker_types) > 0) {
     plot_long <- plot_data %>%
       pivot_longer(cols = -celltype_reannotated, names_to = "gene", values_to = "expression")
     
-    # 定义HSC颜色
+    # Defining HSC colors
     hsc_colors <- c("HSC_Act" = "#C0392B", "HSC_Qui" = "#2980B9", "HSC" = "#FFFF33")
     
     p1f <- ggplot(plot_long, aes(x = gene, y = expm1(expression), fill = celltype_reannotated)) +
@@ -930,7 +932,7 @@ if(length(hsc_marker_types) > 0) {
     theme_void() + ggtitle("F. HSC Marker Expression")
 }
 
-# 组合(2x3布局)
+# Combined (2x3 layout)
 fig1_complete <- (p1a | p1b | p1c) / (p1d | p1e | p1f) + 
   plot_annotation(
     title = "Figure 1. Cell Type Annotation and Fibrosis Characteristics",
@@ -945,37 +947,39 @@ fig1_complete <- (p1a | p1b | p1c) / (p1d | p1e | p1f) +
 
 ggsave(file.path(figures.dir, "Figure1_Cell_Type_Annotation.tiff"), fig1_complete, 
        width = 18, height = 12, dpi = 300, compression = "lzw")
+ggsave(file.path(figures.dir, "Figure1_Cell_Type_Annotation.pdf"), fig1_complete, 
+       width = 18, height = 12, device = cairo_pdf)
 cat("✓ Figure 1 saved to", file.path(figures.dir, "Figure1_Celltype_Complete.tiff"), "\n")
 
-# 保存更新后的对象
+# Saving updated object
 save(high_quality_cells, file = rdata_file)
-cat("✓ 第7步完成: 通路富集分析 + Figure 1生成\n")
+cat("✓ Step 7 completed: Pathway Enrichment Analysis + Figure 1 Generation\n")
 
-# ==================== 8. 肝细胞深度分析(含8基因签名 + 7类应激评分)====================
+# ========= 8. In-depth Hepatocyte Analysis (including 8-gene signature + 7-class stress scoring)===
 cat("
 ")
 cat(paste(rep("=", 70), collapse = ""), "
 ")
-cat("              肝细胞深度分析(8基因签名 + 7类应激评分)
+cat("              In-depth Hepatocyte Analysis (8-gene signature + 7-class stress scoring)
 ")
 cat(paste(rep("=", 70), collapse = ""), "
 ")
 
-# 8.1 提取肝细胞并基础分析
+# 8.1 Extracting hepatocytes and performing basic analysis
 cat("
-=== 步骤8.1: 提取肝细胞并进行基础分析 ===
+=== Step 8.1: Extracting hepatocytes and performing basic analysis ===
 ")
 
 hepatocytes <- subset(high_quality_cells, celltype == "Hepatocyte")
 
 if(ncol(hepatocytes) == 0) {
-  stop("错误: 未找到肝细胞")
+  stop("Error: No hepatocytes found")
 }
 
-cat(sprintf("提取到 %d 个肝细胞
+cat(sprintf("Extracted %d hepatocytes
 ", ncol(hepatocytes)))
 
-# 重新降维(推荐对子集重新分析)
+# Re-dimensional reduction (recommended for subset reanalysis)
 hepatocytes <- NormalizeData(hepatocytes)
 hepatocytes <- FindVariableFeatures(hepatocytes, selection.method = "vst", nfeatures = 2000)
 hepatocytes <- ScaleData(hepatocytes)
@@ -984,9 +988,9 @@ hepatocytes <- FindNeighbors(hepatocytes, dims = 1:20)
 hepatocytes <- FindClusters(hepatocytes, resolution = 0.6)
 hepatocytes <- RunUMAP(hepatocytes, dims = 1:20)
 
-# 8.2 肝小叶分区注释(基于文献标志物)
+# 8.2 Hepatic Zonation Annotation (based on literature markers)
 cat("
-=== 步骤8.2: 肝小叶分区注释 ===
+=== step 8.2: Hepatic Lobule Zonation Annotation ===
 ")
 
 zone_markers <- list(
@@ -994,7 +998,7 @@ zone_markers <- list(
   "Zone3_Pericentral" = c("Cyp2e1", "Cyp1a2", "Glul", "Oat", "Cyp3a11")
 )
 
-# 计算分区评分
+# Calculating zonation scores
 for(zone in names(zone_markers)) {
   genes <- zone_markers[[zone]]
   genes <- genes[genes %in% rownames(hepatocytes)]
@@ -1003,7 +1007,7 @@ for(zone in names(zone_markers)) {
   }
 }
 
-# 基于评分分配区域
+# Assigning zones based on scores
 if(all(c("Zone1_Periportal1", "Zone3_Pericentral1") %in% colnames(hepatocytes@meta.data))) {
   z1_score <- hepatocytes$Zone1_Periportal1
   z3_score <- hepatocytes$Zone3_Pericentral1
@@ -1015,11 +1019,11 @@ if(all(c("Zone1_Periportal1", "Zone3_Pericentral1") %in% colnames(hepatocytes@me
   hepatocytes$hep_zone <- "Zone2_Midlobular"
 }
 
-cat(sprintf("肝细胞分区分布:
+cat(sprintf("Hepatocyte Zonation Distribution:
 "))
 print(table(hepatocytes$hep_zone, hepatocytes$group))
 
-# 可视化分区
+# Visualizing zonation
 p_zone <- DimPlot(hepatocytes, reduction = "umap", group.by = "hep_zone", pt.size = 0.5) +
   ggtitle("A. Hepatocyte Zonation") + theme_journal
 
@@ -1030,13 +1034,15 @@ p_combined_zone <- p_zone + p_zone_group
 
 ggsave(file.path(hep_figures_dir, "FigureH1_Hepatocyte_Zonation.tiff"), 
        p_combined_zone, width = 12, height = 5, dpi = 300)
+ggsave(file.path(hep_figures_dir, "FigureH1_Hepatocyte_Zonation.pdf"), 
+       p_combined_zone, width = 12, height = 5, device = cairo_pdf)
 
-cat("✓ 肝细胞基础分析完成
+cat("✓ Basic hepatocyte analysis completed
 ")
 
-# 8.3 【关键】8基因签名评分(Figure 2专用)
+# 8.3 [Key] 8-Gene Signature Scoring (for Figure 2)
 cat("
-=== 步骤8.3: 8基因签名评分(Figure 2专用)===
+=== Step 8.3: 8-Gene Signature Scoring (Dedicated for Figure 2)===
 ")
 
 fig2_signature_genes <- c("Cyp2e1", "Cyp3a11", "Hspa1a", "Hsp90aa1", 
@@ -1044,14 +1050,14 @@ fig2_signature_genes <- c("Cyp2e1", "Cyp3a11", "Hspa1a", "Hsp90aa1",
 fig2_signature_genes <- fig2_signature_genes[fig2_signature_genes %in% rownames(hepatocytes)]
 
 if(length(fig2_signature_genes) >= 5) {
-  cat(sprintf("使用 %d 个基因计算8基因签名评分
+  cat(sprintf("Calculating 8-gene signature score using %d genes
 ", length(fig2_signature_genes)))
   
   hepatocytes <- AddModuleScore(hepatocytes, 
                                 features = list(fig2_signature_genes), 
                                 name = "Fig2_Signature")
   
-  # 创建Figure 2需要的兼容列名
+  # Creating compatible column names required for Figure 2
   hepatocytes$Stress1 <- hepatocytes$Fig2_Signature1
   hepatocytes$stress_group <- ifelse(
     hepatocytes$Stress1 > mean(hepatocytes$Stress1, na.rm = TRUE) + 
@@ -1059,24 +1065,24 @@ if(length(fig2_signature_genes) >= 5) {
     "High_stress", "Low_stress"
   )
   
-  # 创建obj别名(供Figure 2代码使用)
+  # Creating obj alias (for Figure 2 code usage)
   obj <- hepatocytes
   
-  cat(sprintf("8基因签名评分完成: 高应激细胞 %d/%d (%.1f%%)
+  cat(sprintf("8-gene signature scoring completed: high-stress cells %d/%d (%.1f%%)
 ",
               sum(hepatocytes$stress_group == "High_stress"), 
               ncol(hepatocytes),
               100 * sum(hepatocytes$stress_group == "High_stress") / ncol(hepatocytes)))
-  cat("✓ 已创建对象别名 'obj' 供Figure 2代码使用
+  cat("✓ Object alias 'obj' created for Figure 2 code usage
 ")
 } else {
-  cat("警告: 8基因签名基因不足，跳过计算
+  cat("Warning: Insufficient 8-gene signature genes, skipping calculation
 ")
 }
 
-# 8.4 7类分层应激评分(Figure Master用)
+# 8.4 7-Category Hierarchical Stress Scoring 
 cat("
-=== 步骤8.4: 7类分层应激评分(Figure Master用)===
+=== Step 8.4: 7-Category Hierarchical Stress Scoring===
 ")
 
 stress_categories <- list(
@@ -1089,40 +1095,40 @@ stress_categories <- list(
   "Regeneration" = c("Mki67", "Pcna", "Hgf", "Egfr", "Met", "Axin2", "Wnt2")
 )
 
-# 计算各类型应激评分
+# Calculating stress scores for each category
 for(stress_type in names(stress_categories)) {
   genes <- stress_categories[[stress_type]]
   genes <- genes[genes %in% rownames(hepatocytes)]
   if(length(genes) >= 3) {
     hepatocytes <- AddModuleScore(hepatocytes, features = list(genes), name = stress_type)
-    cat(sprintf("  %s: %d个基因
+    cat(sprintf("  %s: %d genes
 ", stress_type, length(genes)))
   }
 }
 
-# 计算总应激评分(7类总和)
+# Calculating total stress score (sum of 7 categories)
 all_stress_genes <- unlist(stress_categories)
 all_stress_genes <- all_stress_genes[all_stress_genes %in% rownames(hepatocytes)]
 hepatocytes <- AddModuleScore(hepatocytes, features = list(all_stress_genes), name = "Total_Stress")
 
-# 关键: 使用Hep_Stress_Score作为总评分(Figure Master用)
+# Critical: Using Hep_Stress_Score as the total score (for Figure Master)
 hepatocytes$Hep_Stress_Score <- hepatocytes$Total_Stress1
 
 cat(sprintf("
-总应激评分: %d个基因
+Total stress score: %d genes
 ", length(all_stress_genes)))
-cat("✓ 7类分层应激评分完成
+cat("✓ 7-category hierarchical stress scoring completed
 ")
 
-# ==================== 步骤8.5: 生成Figure 2数据文件（优化版）====================
-cat("\n=== 步骤8.5: 生成Figure 2数据文件（Zone 3应激分析）===\n")
+# ========Step 8.5: Generating Figure 2 Data Files (Optimized Version)==============
+cat("\n=== Step 8.5: Generating Figure 2 Data Files (Zone 3 Stress Analysis)===\n")
 
-# 确保目录存在
+# Ensuring directory exists
 if(!dir.exists(hep_tables_dir)) {
   dir.create(hep_tables_dir, recursive = TRUE)
 }
 
-# 1. DE_stress_comprehensive.csv（高vs低应激差异基因）
+# 1. DE_stress_comprehensive.csv（Differential Genes: High vs Low Stress）
 cat("生成 DE_stress_comprehensive.csv...\n")
 
 Idents(hepatocytes) <- "stress_group"
@@ -1145,18 +1151,18 @@ write.csv(de_stress_df,
           file.path(hep_tables_dir, "DE_stress_comprehensive.csv"), 
           row.names = FALSE)
 
-cat(sprintf("  完成: %d个差异基因 (padj<0.05: %d)\n", 
+cat(sprintf("  Completed: %d differential genes (padj<0.05: %d)\n", 
             nrow(de_stress_df), 
             sum(de_stress_df$p_val_adj < 0.05)))
 
-# 2. stress_scores_all_methods.csv（多种评分方法对比）
+# 2. stress_scores_all_methods.csv（Comparison of Multiple Scoring Methods）
 cat("生成 stress_scores_all_methods.csv...\n")
 
 stress_methods_df <- data.frame(
   cell = colnames(hepatocytes),
-  Original_4gene = hepatocytes$Oxidative_Stress1,  # 4基因: 氧化应激
-  Comprehensive_8gene = hepatocytes$Fig2_Signature1,  # 8基因签名
-  Total_7category = hepatocytes$Total_Stress1,  # 7类总和
+  Original_4gene = hepatocytes$Oxidative_Stress1,  # 4 Gene: Oxidative Stress
+  Comprehensive_8gene = hepatocytes$Fig2_Signature1,  # 8-Gene Signature
+  Total_7category = hepatocytes$Total_Stress1,  # Sum of 7 Categories
   Oxidative = hepatocytes$Oxidative_Stress1,
   ERstress = hepatocytes$ER_Stress1,
   Lipid = hepatocytes$Lipid_Dysregulation1
@@ -1166,10 +1172,10 @@ write.csv(stress_methods_df,
           file.path(hep_tables_dir, "stress_scores_all_methods.csv"), 
           row.names = FALSE)
 
-cat("  完成: 6种评分方法\n")
+cat("  Completed: 6 scoring methods\n")
 
-# 3. GO_BP_high_stress_hepatocytes.csv（高应激组GO富集）
-cat("生成 GO_BP_high_stress_hepatocytes.csv...\n")
+# 3. GO_BP_high_stress_hepatocytes.csv（GO Enrichment of High-Stress Group）
+cat("Generating GO_BP_high_stress_hepatocytes.csv...\n")
 
 high_stress_genes <- de_stress_df %>%
   filter(avg_log2FC > 0, p_val_adj < 0.05) %>%
@@ -1189,19 +1195,19 @@ if(length(high_stress_genes) >= 10) {
       write.csv(ego_stress@result, 
                 file.path(hep_tables_dir, "GO_BP_high_stress_hepatocytes.csv"), 
                 row.names = FALSE)
-      cat(sprintf("  完成: %d个GO条目\n", nrow(ego_stress@result)))
+      cat(sprintf("  Completed: %d GO terms \n", nrow(ego_stress@result)))
     } else {
-      cat("  警告: 未找到显著GO富集\n")
+      cat("  Warning: No significant GO enrichment found \n")
     }
   }, error = function(e) {
-    cat("  GO分析错误:", conditionMessage(e), "\n")
+    cat("  GO analyse error:", conditionMessage(e), "\n")
   })
 } else {
-  cat("  警告: 高应激基因不足(<10个)，跳过GO分析\n")
+  cat("  Warning: Insufficient high-stress genes(<10个)，Skipping GO analysis \n")
 }
 
 # 4. KEGG_upregulated_CCl4.csv（CCl4 vs Control KEGG）
-cat("生成 KEGG_upregulated_CCl4.csv...\n")
+cat("generating KEGG_upregulated_CCl4.csv...\n")
 
 Idents(hepatocytes) <- "group"
 de_cc <- FindMarkers(hepatocytes, 
@@ -1232,29 +1238,29 @@ if(length(cc_up_genes) >= 10) {
         write.csv(kk_cc@result, 
                   file.path(hep_tables_dir, "KEGG_upregulated_CCl4.csv"), 
                   row.names = FALSE)
-        cat(sprintf("  完成: %d个KEGG通路\n", nrow(kk_cc@result)))
+        cat(sprintf("  Completed: %d KEGG pathways \n", nrow(kk_cc@result)))
       } else {
-        cat("  警告: 未找到显著KEGG通路\n")
+        cat("  Warning: No significant KEGG pathways found \n")
       }
     } else {
-      cat("  警告: 基因ID转换失败\n")
+      cat("  Warning: Gene ID conversion failed\n")
     }
   }, error = function(e) {
-    cat("  KEGG分析错误:", conditionMessage(e), "\n")
+    cat("  KEGG Analysis Error:", conditionMessage(e), "\n")
   })
 } else {
-  cat("  警告: CCl4上调基因不足(<10个)，跳过KEGG分析\n")
+  cat("  Warning: Insufficient CCl4 upregulated genes (<10)，Skipping KEGG analysis\n")
 }
 
-cat("✓ Figure 2数据文件生成完成\n")
+cat("✓ Figure 2 Data file generation completed\n")
 
-# 保存肝细胞对象
+# Saving hepatocyte object
 save(hepatocytes, file = file.path(work.dir, "results", "2_analysis", "hepatocytes_fig2.RData"))
 
-# ==================== 步骤9: Figure 2生成（Zone 3应激整合版，10 panels）====================
-cat("\n=== 步骤9: Figure 2生成（Zone 3 Hepatocyte Stress Analysis，10 panels）===\n")
+# =====Step 9: Figure 2 Generation (Zone 3 Stress Integration Version)========
+cat("\n=== Step 9: Figure 2 Generation（Zone 3 Hepatocyte Stress Analysis，10 panels）===\n")
 
-# 9.1 加载必要包
+# 9.1 Loading required packages
 if(!requireNamespace("viridis", quietly = TRUE)) install.packages("viridis")
 if(!requireNamespace("RColorBrewer", quietly = TRUE)) install.packages("RColorBrewer")
 if(!requireNamespace("ggrepel", quietly = TRUE)) install.packages("ggrepel")
@@ -1262,10 +1268,10 @@ library(viridis)
 library(RColorBrewer)
 library(ggrepel)
 
-# 9.2 准备数据
+# 9.2 prepair data
 obj <- hepatocytes
 
-# 关键统计
+# Key Statistics
 stats <- list(
   mean = mean(obj$Fig2_Signature1, na.rm = TRUE),
   sd = sd(obj$Fig2_Signature1, na.rm = TRUE),
@@ -1275,10 +1281,10 @@ stats <- list(
   high_pct = 100 * sum(obj$stress_group == "High_stress", na.rm = TRUE) / ncol(obj)
 )
 
-cat(sprintf("8基因签名统计: Mean=%.3f, Threshold=%.3f, High_stress=%d (%.1f%%)\n",
+cat(sprintf("8-Gene Signature Statistics: Mean=%.3f, Threshold=%.3f, High_stress=%d (%.1f%%)\n",
             stats$mean, stats$threshold, stats$n_high, stats$high_pct))
 
-# 统一主题
+# Unified Theme
 fig_theme <- theme_bw(base_size = 9) +
   theme(
     plot.title = element_text(hjust = 0.5, size = 10, face = "bold"),
@@ -1290,8 +1296,8 @@ fig_theme <- theme_bw(base_size = 9) +
     strip.text = element_text(size = 7, face = "bold")
   )
 
-# ==================== Panel A: 肝细胞分区UMAP ====================
-cat("Panel A: 肝细胞分区UMAP\n")
+# ==================== Panel A: Hepatocyte Zonation UMAP ====================
+cat("Panel A: Hepatocyte Zonation UMAP\n")
 
 p_a <- DimPlot(obj, reduction = "umap", group.by = "hep_zone", pt.size = 0.4, label = FALSE) +
   scale_color_manual(values = c("Zone1_Periportal" = "#1f77b4", 
@@ -1302,8 +1308,8 @@ p_a <- DimPlot(obj, reduction = "umap", group.by = "hep_zone", pt.size = 0.4, la
   fig_theme +
   theme(legend.position = "right")
 
-# ==================== Panel B: 分组分布（CCl4富集于Zone 3）====================
-cat("Panel B: 分组分布\n")
+# ==================== Panel B: Group Distribution (CCl4 Enrichment in Zone 3)====================
+cat("Panel B: Group Distribution\n")
 
 p_b <- DimPlot(obj, reduction = "umap", group.by = "group", pt.size = 0.4) +
   scale_color_manual(values = c("CCl4" = "#E74C3C", "Control" = "#3498DB")) +
@@ -1311,8 +1317,8 @@ p_b <- DimPlot(obj, reduction = "umap", group.by = "group", pt.size = 0.4) +
   fig_theme +
   theme(legend.position = "right")
 
-# ==================== Panel C: 8-gene应激评分分布 ====================
-cat("Panel C: 8-gene应激评分分布\n")
+# ==================== Panel C: 8-gene Stress Score Distribution ====================
+cat("Panel C: 8-gene Stress Score Distribution\n")
 
 p_c <- ggplot(data.frame(Score = obj$Fig2_Signature1), aes(x = Score)) +
   geom_histogram(bins = 40, fill = "#4682B4", alpha = 0.8, color = "white") +
@@ -1323,11 +1329,11 @@ p_c <- ggplot(data.frame(Score = obj$Fig2_Signature1), aes(x = Score)) +
   annotate("text", x = stats$threshold, y = Inf, 
            label = sprintf("Threshold=%.3f\nn=%d (%.1f%%)", stats$threshold, stats$n_high, stats$high_pct),
            vjust = 3, hjust = -0.1, size = 2.5, color = "#8B0000") +
-  labs(x = "8-Gene Stress Signature", y = "Cell Count", title = "C. Stress Score Distribution") +
+  labs(x = "8-gene Stress Signature", y = "Cell Count", title = "C. Stress Score Distribution") +
   fig_theme
 
-# ==================== Panel D: 高应激细胞UMAP定位 ====================
-cat("Panel D: 高应激细胞UMAP定位\n")
+# ==================== Panel D: High-Stress Cell UMAP Localization ====================
+cat("Panel D: High-Stress Cell UMAP Localization\n")
 
 p_d <- FeaturePlot(obj, features = "Fig2_Signature1", pt.size = 0.2, order = TRUE) +
   scale_color_viridis_c(option = "plasma", name = "Score") +
@@ -1335,8 +1341,8 @@ p_d <- FeaturePlot(obj, features = "Fig2_Signature1", pt.size = 0.2, order = TRU
   fig_theme +
   theme(legend.position = "right", legend.key.height = unit(0.6, "cm"))
 
-# ==================== Panel E: 分区×分组应激评分定量 ====================
-cat("Panel E: 分区×分组应激评分\n")
+# ==================== Panel E: Zone × Group Stress Score Quantification ====================
+cat("Panel E: Zone × Group Stress Scores\n")
 
 zone_data <- obj@meta.data %>%
   filter(hep_zone %in% c("Zone1_Periportal", "Zone3_Pericentral")) %>%
@@ -1348,7 +1354,7 @@ zone_data <- obj@meta.data %>%
     .groups = 'drop'
   )
 
-# 添加统计检验
+# Add statistical test
 zone_stats <- obj@meta.data %>%
   filter(hep_zone %in% c("Zone1_Periportal", "Zone3_Pericentral"))
 
@@ -1365,8 +1371,8 @@ p_e <- ggplot(zone_data, aes(x = group, y = mean_stress, fill = hep_zone)) +
   fig_theme +
   theme(legend.position = "top", legend.key.size = unit(0.4, "cm"))
 
-# ==================== Panel F: 七类应激热图 ====================
-cat("Panel F: 七类应激热图\n")
+# ==================== Panel F: Seven-Category Stress Heatmap ====================
+cat("Panel F: Seven-Category Stress Heatmap\n")
 
 stress_categories <- list(
   "Oxidative" = "Oxidative_Stress1",
@@ -1391,7 +1397,7 @@ for(stress_name in names(stress_categories)) {
   }
 }
 
-# 确保正确顺序
+# Ensurecorrectlyorder
 stress_summary$stress_type <- factor(stress_summary$stress_type, 
                                      levels = c("Oxidative", "ER", "Inflammation", "Death", 
                                                 "ProFibrotic", "Lipid", "Regeneration"))
@@ -1409,8 +1415,8 @@ p_f <- ggplot(stress_summary, aes(x = interaction(group, hep_zone), y = stress_t
   theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 7),
         axis.text.y = element_text(size = 7))
 
-# ==================== Panel G: Hmox1 vs Hspa1a对比（氧化vs热休克）====================
-cat("Panel G: Hmox1 vs Hspa1a对比\n")
+# ==================== Panel G: Hmox1 vs Hspa1a Comparison (Oxidative vs Heat Shock)====================
+cat("Panel G: Hmox1 vs Hspa1a Comparison\n")
 
 contrast_genes <- c("Hmox1", "Hspa1a")
 contrast_data <- data.frame()
@@ -1430,7 +1436,7 @@ for (g in contrast_genes) {
   }
 }
 
-# 获取统计信息
+# Getstatisticsinfo
 hmox1_info <- de_stress_df %>% filter(gene == "Hmox1")
 hspa1a_info <- de_stress_df %>% filter(gene == "Hspa1a")
 
@@ -1448,10 +1454,10 @@ p_g <- ggplot(contrast_data, aes(x = stress_group, y = mean_expr, fill = stress_
         strip.background = element_rect(fill = "grey90"),
         plot.subtitle = element_text(size = 7, hjust = 0.5))
 
-# ==================== Panel H: Cyp2e1三层比较 ====================
-cat("Panel H: Cyp2e1三层比较\n")
+# ==================== Panel H: Cyp2e1 Three-Layer Comparison ====================
+cat("Panel H: Cyp2e1 Three-Layer Comparison\n")
 
-# 计算三层比较
+# Calculate three-layer comparison
 cyp_high_vs_low <- de_stress_df %>% filter(gene == "Cyp2e1")
 
 Idents(obj) <- "group"
@@ -1493,8 +1499,8 @@ p_h <- ggplot(cyp_comparison, aes(x = Comparison, y = logFC, fill = Direction)) 
   fig_theme +
   theme(legend.position = "none", axis.text.x = element_text(size = 7))
 
-# ==================== Panel I: 8基因签名表达点图 ====================
-cat("Panel I: 8基因签名表达\n")
+# ==================== Panel I: 8-gene Signature Expression Dot Plot ====================
+cat("Panel I: 8-gene Signature Expression\n")
 
 fig2_signature_genes <- c("Cyp2e1", "Cyp3a11", "Hspa1a", "Hsp90aa1", 
                           "Gpx1", "Hmox1", "Atf4", "Gadd45a")
@@ -1534,12 +1540,12 @@ p_i <- ggplot(dot_data, aes(x = reorder(gene, logFC), y = logFC,
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
   scale_size_continuous(range = c(2, 8), name = "% Cells\n(High)") +
   scale_color_brewer(palette = "Set2", name = "Pathway") +
-  labs(x = "", y = expression(log[2]~FC~High/Low), title = "I. 8-Gene Signature Expression") +
+  labs(x = "", y = expression(log[2]~FC~High/Low), title = "I. 8-gene Signature Expression") +
   fig_theme +
   theme(legend.position = "right", axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
 
-# ==================== Panel J: GO-BP富集 ====================
-cat("Panel J: GO-BP富集\n")
+# ==================== Panel J: GO-BP Enrichment ====================
+cat("Panel J: GO-BP Enrichment\n")
 
 go_file <- file.path(hep_tables_dir, "GO_BP_high_stress_hepatocytes.csv")
 
@@ -1552,7 +1558,7 @@ if (file.exists(go_file)) {
       geom_point(alpha = 0.8) +
       scale_color_gradient(low = "red", high = "blue", trans = "log10", name = "p.adj") +
       scale_size_continuous(range = c(3, 8)) +
-      labs(x = "Gene Count", y = "", title = "J. GO-BP: High-Stress Hepatocytes") +
+      labs(x = "gene Count", y = "", title = "J. GO-BP: High-Stress Hepatocytes") +
       fig_theme + 
       theme(axis.text.y = element_text(size = 6))
   } else {
@@ -1564,8 +1570,8 @@ if (file.exists(go_file)) {
     labs(title="J. GO-BP") + theme_void() + fig_theme
 }
 
-# ==================== Panel K: KEGG富集 ====================
-cat("Panel K: KEGG通路富集\n")
+# ==================== Panel K: KEGG Enrichment ====================
+cat("Panel K: KEGG Pathway Enrichment\n")
 
 kegg_file <- file.path(hep_tables_dir, "KEGG_upregulated_CCl4.csv")
 
@@ -1578,7 +1584,7 @@ if (file.exists(kegg_file)) {
       geom_point(alpha = 0.8) +
       scale_color_gradient(low = "red", high = "blue", trans = "log10", name = "p.adj") +
       scale_size_continuous(range = c(3, 8)) +
-      labs(x = "Gene Count", y = "", title = "K. KEGG: CCl4 vs Control") +
+      labs(x = "gene Count", y = "", title = "K. KEGG: CCl4 vs Control") +
       fig_theme + 
       theme(axis.text.y = element_text(size = 6))
   } else {
@@ -1590,16 +1596,16 @@ if (file.exists(kegg_file)) {
     labs(title="K. KEGG") + theme_void() + fig_theme
 }
 
-# ==================== 组合完整Figure 2（3行布局）====================
-cat("组合完整Figure 2...\n")
+# ==================== Assemble Complete Figure 2 (3-Row Layout)====================
+cat("Assemble Complete Figure 2...\n")
 
-# 第1行: A B C D（分区与评分分布）
+# Row 1: A B C D（Zone and Score distribution）
 row1 <- p_a + p_b + p_c + p_d + plot_layout(widths = c(1, 1, 1.2, 1.2))
 
-# 第2行: E F G H（分区定量、七类应激、机制对比）
+# Row 2: E F G H（Zone quantification, Seven-category stress, Mechanism comparison）
 row2 <- p_e + p_f + p_g + p_h + plot_layout(widths = c(1, 1.2, 1, 1))
 
-# 第3行: I J K（签名表达、GO、KEGG）- 3 panels，留空或调整
+# Row 3: I J K（Signatureexpression, GO, KEGG）- 3 panels, Leave empty or adjust
 row3 <- p_i + p_j + p_k + plot_layout(widths = c(1.2, 1, 1))
 
 fig2 <- row1 / row2 / row3 +
@@ -1615,7 +1621,7 @@ fig2 <- row1 / row2 / row3 +
     tag_levels = list(c("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"))
   )
 
-# 保存
+# Save
 ggsave(file.path(figures.dir, "Figure2_Zone3_Hepatocyte_Stress.tiff"), 
        fig2, width = 16, height = 13, dpi = 300, compression = "lzw")
 
@@ -1623,32 +1629,32 @@ ggsave(file.path(figures.dir, "Figure2_Zone3_Hepatocyte_Stress.pdf"),
        fig2, width = 16, height = 13, device = cairo_pdf)
 
 cat("\n✓ Figure 2 Complete: Zone 3 Hepatocyte Stress Analysis (11 panels: A-K)\n")
-cat(sprintf("输出: %s/Figure2_Zone3_Hepatocyte_Stress.{tiff,pdf}\n", figures.dir))
+cat(sprintf("Output: %s/Figure2_Zone3_Hepatocyte_Stress.{tiff,pdf}\n", figures.dir))
 
-# ==================== 步骤10: Figure 3:HSC激活机制 ====================
+# ==================== Step 10: Figure 3:HSC Activation Mechanisms ====================
 cat("\n")
 cat(paste(rep("=", 70), collapse = ""), "\n")
 cat("              Figure 5: HSC Activation and Fibrosis Mechanisms (9 panels, 3x3)\n")
 cat(paste(rep("=", 70), collapse = ""), "\n")
 
-# 检查并加载必要的数据
+# CheckandLoadnecessary data
 if(!exists("high_quality_cells")) {
   load(file.path(work.dir, "results", "2_analysis", "high_quality_cells.RData"))
-  cat("✓ 加载high_quality_cells对象\n")
+  cat("✓ Loadhigh_quality_cellsobject\n")
 }
 
 fig_theme <- theme_bw(base_size = 10) +
   theme(plot.title = element_text(hjust = 0.5, face = "bold"),
         panel.grid.minor = element_blank())
 
-# 加载DEG结果(使用已存在的hsc_deg或从文件加载)
+# LoadDEG results(Useexistinghsc_degorfrom fileLoad)
 if(!exists("hsc_deg")) {
   deg_file <- file.path(tables.dir, "Table_DEG_HSC_Act_vs_Qui_CCl4.csv")
   if(file.exists(deg_file)) {
     hsc_deg <- read.csv(deg_file)
-    cat("✓ 从文件加载HSC DEG结果:", nrow(hsc_deg), "个基因\n")
+    cat("✓ from fileLoadHSC DEG results:", nrow(hsc_deg), "Gene\n")
   } else {
-    stop("错误: 未找到HSC DEG结果文件")
+    stop("Error: Not foundHSC DEG resultsfile")
   }
 }
 
@@ -1672,10 +1678,10 @@ p3a <- ggplot(hsc_comp, aes(x = group, y = n, fill = celltype_reannotated)) +
   labs(x = "", y = "Cell Count", title = "A. HSC Activation Status") +
   fig_theme
 
-# ========== Panel B: DEG Volcano ==========
-cat("Panel B: DEG Volcano...\n")
+# ========== Panel B: DEG Volcano Plot ==========
+cat("Panel B: DEG Volcano Plot...\n")
 
-# 确保significance列被正确创建
+# EnsuresignificanceColumniscorrectlyCreate
 hsc_deg <- hsc_deg %>%
   mutate(significance = case_when(
     p_val_adj < 0.05 & avg_log2FC > 0.5 ~ "Up in CCl4",
@@ -1699,28 +1705,28 @@ p3b <- ggplot(hsc_deg, aes(x = avg_log2FC, y = -log10(p_val_adj), color = signif
   fig_theme +
   theme(legend.position = "bottom")
 
-# ========== Panel C: Top Fibrosis Genes Dot Plot ==========
-cat("Panel C: Fibrosis Genes...\n")
+# ========== Panel C: Top Fibrosis genes Dot Plot ==========
+cat("Panel C: Fibrosis genes...\n")
 
 fibrosis_genes <- c("Col1a1", "Col1a2", "Col3a1", "Acta2", "Timp1", "Spp1", "Lox", "Cthrc1")
 hsc_subset <- subset(high_quality_cells, celltype_reannotated %in% c("HSC_Act", "HSC_Qui"))
 
-# 检查基因是否存在
+# CheckGeneexistence
 available_genes <- fibrosis_genes[fibrosis_genes %in% rownames(hsc_subset)]
 missing_genes <- fibrosis_genes[!fibrosis_genes %in% rownames(hsc_subset)]
 if(length(missing_genes) > 0) {
-  cat("  警告: 缺失基因:", paste(missing_genes, collapse = ", "), "\n")
+  cat("  Warning: missingGene:", paste(missing_genes, collapse = ", "), "\n")
 }
 
 if(length(available_genes) > 0) {
   p3c <- DotPlot(hsc_subset, features = available_genes, group.by = "celltype_reannotated",
                  cols = c("lightgrey", "#E41A1C")) +
     RotatedAxis() +
-    labs(title = "C. Core Fibrosis Genes") +
+    labs(title = "C. Core Fibrosis genes") +
     fig_theme +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 } else {
-  # 备用: 使用ggplot手动创建
+  # Backup: UseggplotmanuallyCreate
   dot_data <- hsc_deg %>% 
     filter(gene %in% fibrosis_genes) %>%
     select(gene, avg_log2FC, p_val_adj) %>%
@@ -1729,31 +1735,31 @@ if(length(available_genes) > 0) {
   p3c <- ggplot(dot_data, aes(x = gene, y = "HSC_Act", size = pct_expr, color = avg_log2FC)) +
     geom_point() +
     scale_color_gradient(low = "lightgrey", high = "#E41A1C") +
-    labs(title = "C. Core Fibrosis Genes (DEG-based)") +
+    labs(title = "C. Core Fibrosis genes (DEG-based)") +
     fig_theme
 }
 
-# ========== Panel D-F: 富集分析(带容错) ==========
+# ========== Panel D-F: Enrichment Analysis (with Error Handling) ==========
 cat("Panel D-F: Enrichment Analysis...\n")
 
-# 准备基因列表
+# Prepare gene list
 up_genes <- hsc_deg %>% 
   filter(avg_log2FC > 0.25 & p_val_adj < 0.05) %>%
   pull(gene)
 
-cat("  上调基因数:", length(up_genes), "\n")
+cat("  UpregulatedGenenumber:", length(up_genes), "\n")
 
-# 尝试基因转换
-cat("  转换基因ID...\n")
+# TryGeneConvert
+cat("  ConvertGeneID...\n")
 gene_conv <- tryCatch({
   bitr(up_genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Mm.eg.db)
 }, error = function(e) {
-  cat("  转换失败:", e$message, "\n")
+  cat("  Convertfailed:", e$message, "\n")
   return(NULL)
 })
 
 if(!is.null(gene_conv) && nrow(gene_conv) > 10) {
-  cat("  成功转换", nrow(gene_conv), "个基因\n")
+  cat("  successfullyConvert", nrow(gene_conv), "Gene\n")
   
   # Panel D: GO-BP
   ego_bp <- tryCatch({
@@ -1783,26 +1789,26 @@ if(!is.null(gene_conv) && nrow(gene_conv) > 10) {
       labs(title="E. KEGG Pathway") + theme_void() + fig_theme
   }
   
-  # Panel F: Gene-Concept Network
+  # Panel F: gene-Concept Network
   if(!is.null(ego_bp) && nrow(as.data.frame(ego_bp)) > 0) {
     p3f <- cnetplot(ego_bp, showCategory = 5, 
                     foldChange = setNames(hsc_deg$avg_log2FC, hsc_deg$gene)) +
-      ggtitle("F. Gene-Pathway Network") +
+      ggtitle("F. gene-Pathway Network") +
       theme_bw()
   } else {
     p5f <- ggplot() + annotate("text", x=0.5, y=0.5, label="Network not available") + 
-      labs(title="F. Gene-Pathway Network") + theme_void()
+      labs(title="F. gene-Pathway Network") + theme_void()
   }
   
 } else {
-  cat("  基因转换失败或基因数不足，跳过富集分析\n")
+  cat("  Gene conversion failed or insufficient gene number, Skip Enrichment Analysis\n")
   empty_plot <- ggplot() + annotate("text", x=0.5, y=0.5, 
                                     label="Enrichment analysis failed\n(insufficient gene mapping)") + 
     theme_void() + fig_theme
   
   p3d <- empty_plot + labs(title="D. GO Biological Process")
   p3e <- empty_plot + labs(title="E. KEGG Pathway")
-  p3f <- empty_plot + labs(title="F. Gene-Pathway Network")
+  p3f <- empty_plot + labs(title="F. gene-Pathway Network")
 }
 
 # ========== Panel G: Core Fibrosis Heatmap ==========
@@ -1814,14 +1820,10 @@ available_core <- fibrosis_core[fibrosis_core %in% rownames(hsc_subset)]
 if(length(available_core) >= 4) {
   expr_avg <- AverageExpression(hsc_subset, features = available_core, group.by = "celltype_reannotated")$RNA
   
-  expr_df <- as.data.frame(expr_avg) %>%
-    tibble::rownames_to_column("gene") %>%
-    tidyr::pivot_longer(cols = -gene, names_to = "group", values_to = "expression")
-  
-  p3g <- ggplot(expr_df, aes(x = group, y = reorder(gene, expression), fill = expression)) +
+   p3g <- ggplot(expr_df, aes(x = group, y = reorder(gene, expression), fill = expression)) +
     geom_tile() +
     scale_fill_gradient(low = "blue", high = "red") +
-    labs(x = "", y = "", title = "G. Core Fibrosis Genes") +
+    labs(x = "", y = "", title = "G. Core Fibrosis genes") +
     fig_theme
   
   tryCatch({
@@ -1829,14 +1831,14 @@ if(length(available_core) >= 4) {
                        color = colorRampPalette(c("blue", "white", "red"))(50),
                        filename = file.path(figures.dir, "Figure5G_heatmap_pheatmap.pdf"),
                        width = 6, height = 8)
-  }, error = function(e) cat("  pheatmap保存失败(可忽略)\n"))
+  }, error = function(e) cat("  pheatmapSavefailed((ignorable))\n"))
   
 } else {
   p3g <- ggplot() + annotate("text", x=0.5, y=0.5, label="Insufficient genes for heatmap") + 
-    labs(title="G. Core Fibrosis Genes") + theme_void() + fig_theme
+    labs(title="G. Core Fibrosis genes") + theme_void() + fig_theme
 }
 
-# ========== Panel H: GSEA (简化版) ==========
+# ========== Panel H: GSEA (Simplified) ==========
 cat("Panel H: GSEA...\n")
 
 gsea_data <- hsc_deg %>%
@@ -1848,7 +1850,7 @@ p3h <- ggplot(gsea_data, aes(x = reorder(gene, avg_log2FC), y = avg_log2FC, fill
   geom_bar(stat = "identity") +
   scale_fill_manual(values = c("TRUE" = "#E41A1C", "FALSE" = "#377EB8")) +
   coord_flip() +
-  labs(x = "", y = expression(log[2]~FC), title = "H. Top Ranked Genes (GSEA-style)") +
+  labs(x = "", y = expression(log[2]~FC), title = "H. Top Ranked genes (GSEA-style)") +
   fig_theme +
   theme(legend.position = "none")
 
@@ -1881,13 +1883,13 @@ if(nrow(target_data) > 0) {
     labs(title="I. Therapeutic Target Priority") + theme_void() + fig_theme
 }
 
-# ========== 组合 Figure 3 (3x3布局) ==========
-cat("组合 Figure 3 (3x3布局)...\n")
+# ========== Assemble Figure 3 (3x3 Layout) ==========
+cat("Assemble Figure 3 (3x3 Layout)...\n")
 
-# 修正：使用 p3a-p3i 而不是 p5a-p5i
+# Correction：Use p3a-p3i instead of p5a-p5i
 fig3 <- wrap_plots(p3a, p3b, p3c, p3d, p3e, p3f, p3g, p3h, p3i, ncol = 3) +
   plot_annotation(
-    title = "Figure 3. HSC Activation Status and Fibrosis Mechanisms",  # 统一标题
+    title = "Figure 3. HSC Activation Status and Fibrosis Mechanisms",  # Unified title
     subtitle = "Comprehensive analysis of hepatic stellate cell activation, differential expression, pathway enrichment, and therapeutic targets",
     tag_levels = "A",
     theme = theme(
@@ -1897,26 +1899,26 @@ fig3 <- wrap_plots(p3a, p3b, p3c, p3d, p3e, p3f, p3g, p3h, p3i, ncol = 3) +
   ) &
   theme(plot.tag = element_text(face = "bold", size = 12))
 
-# 修正：使用 fig3 而不是 fig5
+# Correction：Use fig3 instead of fig5
 ggsave(file.path(figures.dir, "Figure3_HSC_Activation_Mechanisms.tiff"), 
-       fig3, width = 15, height = 15, dpi = 300, compression = "lzw")  # ✅ 用fig3
+       fig3, width = 15, height = 15, dpi = 300, compression = "lzw")  # ✅ using fig3
 
 ggsave(file.path(figures.dir, "Figure3_HSC_Activation_Mechanisms.pdf"), 
-       fig3, width = 15, height = 15, device = cairo_pdf)  # ✅ 用fig3
+       fig3, width = 15, height = 15, device = cairo_pdf)  # ✅ using fig3
 
 ggsave(file.path(figures.dir, "Figure3_HSC_Activation_Mechanisms.png"), 
-       fig3, width = 15, height = 15, dpi = 300)  # ✅ 用fig3
+       fig3, width = 15, height = 15, dpi = 300)  # ✅ using fig3
 
-cat("\n✓ Figure 3 Complete! (HSC激活机制，9 panels A-I)\n")  # 统一输出信息
+cat("\n✓ Figure 3 Complete! (HSC Activation Mechanisms, 9 panels A-I)\n")  # Unified output info
 
-# ==================== 步骤11: Figure 4 - 通讯分析====================
+# ==================== Step 11: Figure 4 - Communication Analysis====================
 cat("\n")
 cat(paste(rep("=", 70), collapse = ""), "\n")
 cat("              Figure 3: Comprehensive Hepatocyte-HSC Communication Analysis\n")
-cat("              (CellChat + Custom LR Analysis) - 完全修复版\n")
+cat("              (CellChat + Custom LR Analysis) - Fully Fixed Version\n")
 cat(paste(rep("=", 70), collapse = ""), "\n")
 
-# 10.1 加载必要包
+# 10.1 Loading Required Packages
 if(!requireNamespace("circlize", quietly = TRUE)) install.packages("circlize")
 if(!requireNamespace("ComplexHeatmap", quietly = TRUE)) BiocManager::install("ComplexHeatmap")
 if(!requireNamespace("magick", quietly = TRUE)) install.packages("magick")
@@ -1927,13 +1929,13 @@ suppressPackageStartupMessages({
   library(magick)
 })
 
-# 确保CellChat加载
+# EnsureCellChatLoad
 if(!requireNamespace("CellChat", quietly = TRUE)) {
-  stop("请先安装CellChat: devtools::install_github('sqjin/CellChat')")
+  stop("Please install firstCellChat: devtools::install_github('sqjin/CellChat')")
 }
 library(CellChat)
 
-# 修复命名空间冲突
+# Fix namespace conflicts
 select <- dplyr::select
 filter <- dplyr::filter
 mutate <- dplyr::mutate
@@ -1943,7 +1945,7 @@ group_by <- dplyr::group_by
 summarise <- dplyr::summarise
 pull <- dplyr::pull
 
-# 10.2 加载CellChat对象
+# 10.2 Loading CellChat Objects
 cellchat.dir <- file.path(work.dir, "results", "2_analysis", "cellchat")
 cellchat_available <- FALSE
 
@@ -1952,49 +1954,49 @@ if(dir.exists(cellchat.dir)) {
   control_rds <- file.path(cellchat.dir, "cellchat_Control.rds")
   
   if(file.exists(ccl4_rds) && file.exists(control_rds)) {
-    cat("加载CellChat对象...\n")
+    cat("Loading CellChat Objects...\n")
     cellchat_ccl4 <- readRDS(ccl4_rds)
     cellchat_ctrl <- readRDS(control_rds)
     cellchat_available <- TRUE
-    cat("✓ CellChat对象已加载\n")
+    cat("✓ CellChat object loaded\n")
     
-    # 检查对象结构
+    # Check object structure
     cell_types_ccl4 <- levels(cellchat_ccl4@idents)
     cell_types_ctrl <- levels(cellchat_ctrl@idents)
-    cat(sprintf("  CCl4组细胞类型 (%d): %s\n", length(cell_types_ccl4), 
+    cat(sprintf("  CCl4 Group cell types (%d): %s\n", length(cell_types_ccl4), 
                 paste(cell_types_ccl4, collapse = ", ")))
-    cat(sprintf("  Control组细胞类型 (%d): %s\n", length(cell_types_ctrl), 
+    cat(sprintf("  Control Group cell types (%d): %s\n", length(cell_types_ctrl), 
                 paste(cell_types_ctrl, collapse = ", ")))
     
-    # 识别关键细胞类型
+    # Identify key cell types
     hep_types <- cell_types_ccl4[grep("Hepatocyte", cell_types_ccl4, ignore.case = TRUE)]
     hsc_types <- cell_types_ccl4[grep("HSC", cell_types_ccl4, ignore.case = TRUE)]
     
-    cat(sprintf("  肝细胞类型: %s\n", paste(hep_types, collapse = ", ")))
-    cat(sprintf("  HSC类型: %s\n", paste(hsc_types, collapse = ", ")))
+    cat(sprintf("  Hepatocyte types: %s\n", paste(hep_types, collapse = ", ")))
+    cat(sprintf("  HSC types: %s\n", paste(hsc_types, collapse = ", ")))
     
     if("HSC_Act" %in% cell_types_ctrl) {
-      cat("  ✓ Control组包含HSC_Act\n")
+      cat("  ✓ Control Group contains HSC_Act\n")
     } else {
-      cat("  ! Control组缺少HSC_Act(细胞数不足被排除)\n")
+      cat("  ! Control Group lacks HSC_Act(Insufficient cell number excluded)\n")
     }
   } else {
-    cat("! 未找到CellChat RDS文件\n")
+    cat("! CellChat RDS file not found\n")
   }
 } else {
-  cat("! 未找到CellChat目录\n")
+  cat("! CellChat directory not found\n")
 }
 
-# ==================== 关键修复: 安全的通讯数据提取函数 ====================
+# ==================== Key Fix: Safe Communication Data Extraction Function ====================
 
-#' 从CellChat对象安全提取通讯数据
-#' 兼容v1.x和v2.x版本
+#' Safely extract communication data from CellChat object
+#' Compatible with v1.x and v2.x versions
 extract_communication_safe <- function(cellchat_obj, sources = NULL, targets = NULL) {
   
-  # 方法1: 尝试使用subsetCommunication(v2.0+)
+  # Method 1: TryUsesubsetCommunication(v2.0+)
   comm_data <- tryCatch({
     if(!is.null(sources) && !is.null(targets)) {
-      # 尝试调用CellChat命名空间的函数
+      # Try calling CellChat namespace function
       CellChat::subsetCommunication(cellchat_obj, 
                                     sources.use = sources, 
                                     targets.use = targets)
@@ -2002,46 +2004,46 @@ extract_communication_safe <- function(cellchat_obj, sources = NULL, targets = N
       CellChat::subsetCommunication(cellchat_obj)
     }
   }, error = function(e) {
-    cat("    subsetCommunication失败:", conditionMessage(e), "\n")
-    cat("    尝试替代方法...\n")
+    cat("    subsetCommunicationfailed:", conditionMessage(e), "\n")
+    cat("    Try alternative method...\n")
     return(NULL)
   })
   
-  # 方法2: 如果方法1失败，直接从@net提取
+  # Method 2: If Method 1 failed, Extract directly from @net
   if(is.null(comm_data) || nrow(comm_data) == 0) {
-    cat("    使用@net$prob直接提取...\n")
+    cat("    Extract directly using @net$prob...\n")
     
     if(!"net" %in% slotNames(cellchat_obj) || 
        is.null(cellchat_obj@net$prob)) {
-      cat("    ! 无法提取通讯数据\n")
+      cat("    ! Unable to extract communication data\n")
       return(data.frame())
     }
     
     prob_matrix <- cellchat_obj@net$prob
     cell_types <- rownames(prob_matrix)
     
-    # 筛选source
+    # Filtersource
     if(!is.null(sources)) {
       source_idx <- which(cell_types %in% sources)
     } else {
       source_idx <- 1:nrow(prob_matrix)
     }
     
-    # 筛选target
+    # Filtertarget
     if(!is.null(targets)) {
       target_idx <- which(cell_types %in% targets)
     } else {
       target_idx <- 1:ncol(prob_matrix)
     }
     
-    # 提取子矩阵
+    # Extract sub-matrix
     if(length(source_idx) == 0 || length(target_idx) == 0) {
       return(data.frame())
     }
     
     sub_prob <- prob_matrix[source_idx, target_idx, drop = FALSE]
     
-    # 转换为数据框格式(模拟subsetCommunication输出)
+    # Convert to dataframe format(Simulate subsetCommunication output)
     comm_list <- list()
     
     for(i in 1:nrow(sub_prob)) {
@@ -2073,30 +2075,30 @@ extract_communication_safe <- function(cellchat_obj, sources = NULL, targets = N
   return(comm_data)
 }
 
-# ==================== 第1行: CellChat分析 (Panel A-D) ====================
+# ==================== Row 1: CellChat Analysis (Panel A-D) ====================
 
 if(cellchat_available) {
-  cat("\n========== Panel A-D: CellChat分析 ==========\n")
+  cat("\n========== Panel A-D: CellChat Analysis ==========\n")
   
-  # 提取通讯数据
-  cat("\n提取CCl4组通讯数据...\n")
+  # Extract communication data
+  cat("\nExtract CCl4 Group communication data...\n")
   df_comm_ccl4 <- extract_communication_safe(cellchat_ccl4)
-  cat(sprintf("  CCl4总通讯对: %d\n", nrow(df_comm_ccl4)))
+  cat(sprintf("  CCl4 total Communication Pairs: %d\n", nrow(df_comm_ccl4)))
   
-  cat("\n提取Control组通讯数据...\n")
+  cat("\nExtract Control Group communication data...\n")
   df_comm_ctrl <- extract_communication_safe(cellchat_ctrl)
-  cat(sprintf("  Control总通讯对: %d\n", nrow(df_comm_ctrl)))
+  cat(sprintf("  Control total Communication Pairs: %d\n", nrow(df_comm_ctrl)))
   
-  # 提取Hep→HSC特异性通讯
-  cat("\n提取Hep→HSC特异性通讯...\n")
+  # Extract Hep→HSC specific communication
+  cat("\nExtract Hep→HSC specific communication...\n")
   hep_hsc_ccl4 <- extract_communication_safe(cellchat_ccl4, hep_types, hsc_types)
   hep_hsc_ctrl <- extract_communication_safe(cellchat_ctrl, hep_types, hsc_types)
   
   cat(sprintf("  CCl4 Hep→HSC: %d\n", nrow(hep_hsc_ccl4)))
   cat(sprintf("  Control Hep→HSC: %d\n", nrow(hep_hsc_ctrl)))
   
-  # Panel A: CellChat通讯概览
-  cat("\nPanel A: CellChat通讯概览...\n")
+  # Panel A: CellChat Communication Overview
+  cat("\nPanel A: CellChat Communication Overview...\n")
   
   comm_counts <- data.frame(
     Group = c("Control", "CCl4"),
@@ -2117,15 +2119,15 @@ if(cellchat_available) {
     theme_journal +
     theme(legend.position = "top", legend.title = element_blank())
   
-  # 保存通讯数据
+  # Save communication data
   write.csv(df_comm_ccl4, file.path(tables.dir, "Table_Figure3_CellChat_CCl4.csv"), row.names = FALSE)
   write.csv(hep_hsc_ccl4, file.path(tables.dir, "Table_Figure3_CellChat_Hep_HSC_CCl4.csv"), row.names = FALSE)
   
-  # ==================== Panel B: Top LR气泡图(修复版)====================
-  cat("Panel B: Top LR气泡图...\n")
+  # ==================== Panel B: Top LR Bubble Plot (Fixed Version)====================
+  cat("Panel B: Top LR Bubble Plot...\n")
   
   if(nrow(hep_hsc_ccl4) > 0) {
-    # 修复关键: 按source-target合并概率，避免重复pair
+    # Key fix: Merge probability by source-target, Avoid duplicate pairs
     hep_hsc_ccl4_clean <- hep_hsc_ccl4 %>%
       group_by(source, target) %>%
       summarise(
@@ -2135,14 +2137,14 @@ if(cellchat_available) {
       ) %>%
       mutate(pair = paste(source, "→", target))
     
-    # 双重检查: 确保无重复
+    # Double check: Ensure no duplicates
     if(anyDuplicated(hep_hsc_ccl4_clean$pair) > 0) {
-      warning("仍存在重复pair，强制去重")
+      warning("Duplicate pairs still exist, Force deduplication")
       hep_hsc_ccl4_clean <- hep_hsc_ccl4_clean %>%
         distinct(pair, .keep_all = TRUE)
     }
     
-    # 获取top 15
+    # Gettop 15
     top_pairs <- hep_hsc_ccl4_clean %>%
       arrange(desc(prob)) %>%
       head(15)
@@ -2150,7 +2152,7 @@ if(cellchat_available) {
     cat(sprintf("  Top 15 Hep→HSC pairs selected (from %d unique pairs)\n", 
                 nrow(hep_hsc_ccl4_clean)))
     
-    # 准备绘图数据
+    # Prepare plotting data
     plot_data <- hep_hsc_ccl4_clean %>%
       filter(pair %in% top_pairs$pair) %>%
       mutate(
@@ -2158,7 +2160,7 @@ if(cellchat_available) {
         Group = "CCl4"
       )
     
-    # 添加Control组数据
+    # Add Control Group data
     if(nrow(hep_hsc_ctrl) > 0) {
       hep_hsc_ctrl_clean <- hep_hsc_ctrl %>%
         group_by(source, target) %>%
@@ -2177,7 +2179,7 @@ if(cellchat_available) {
       }
     }
     
-    # 绘制气泡图
+    # Plot bubble chart
     p4b <- ggplot(plot_data, aes(x = Group, y = pair, size = prob, color = prob)) +
       geom_point(alpha = 0.8) +
       scale_color_gradient(low = "#56B1F7", high = "#132B43", name = "Prob") +
@@ -2190,7 +2192,7 @@ if(cellchat_available) {
       labs(title="B. Top 15 Hep→HSC Pairs") + theme_void() + theme_journal
   }
   
-  # Panel C: 通路活性(使用Hep→HSC通讯强度作为替代)
+  # Panel C: Pathway Activity(UseHep→HSCCommunication Strengthasalternative)
   if(nrow(hep_hsc_ccl4) > 0) {
     pw_df <- hep_hsc_ccl4 %>%
       group_by(target) %>%
@@ -2210,8 +2212,8 @@ if(cellchat_available) {
       labs(title="C. Pathway Activity") + theme_void() + theme_journal
   }
   
-  # Panel D: HSC激活状态转变
-  cat("Panel D: HSC激活状态转变...\n")
+  # Panel D: HSC Activation State Transition
+  cat("Panel D: HSC Activation State Transition...\n")
   
   if(nrow(hep_hsc_ccl4) > 0 || nrow(hep_hsc_ctrl) > 0) {
     qui_ccl4 <- if(nrow(hep_hsc_ccl4) > 0) sum(hep_hsc_ccl4$target == "HSC_Qui", na.rm = TRUE) else 0
@@ -2247,10 +2249,10 @@ if(cellchat_available) {
       labs(title="D. Target HSC State") + theme_void() + theme_journal
   }
   
-  cat("✓ Panel A-D完成\n")
+  cat("✓ Panel A-Dcompleted\n")
   
 } else {
-  cat("! CellChat不可用，生成占位图\n")
+  cat("! CellChatnot available, Generate placeholder plot\n")
   empty_plot <- ggplot() + annotate("text", x=0.5, y=0.5, 
                                     label="CellChat data not available\nRun run_cellchat_analysis.R first") + 
     theme_void() + theme_journal
@@ -2261,10 +2263,10 @@ if(cellchat_available) {
   p4d <- empty_plot + labs(title = "D. Target HSC State")
 }
 
-# ==================== 第2行: 自定义LR分析 + 弦图 (Panel E-H) ====================
-cat("\n========== Panel E-H: 自定义LR分析与弦图 ==========\n")
+# ==================== Row 2: Custom LR Analysis + Chord diagram (Panel E-H) ====================
+cat("\n========== Panel E-H: Custom LR Analysis and Chord Diagram ==========\n")
 
-# 定义关键的配体-受体对(基于文献的Hep→HSC通讯)
+# Define key Ligand-Receptor Pairs(Based on literature Hep→HSC communication)
 key_lr_pairs <- list(
   "Tgfb1_Tgfbr" = c("Tgfb1", "Tgfbr1", "Tgfbr2"),
   "Pdgfa_Pdgfra" = c("Pdgfa", "Pdgfra"),
@@ -2278,8 +2280,8 @@ key_lr_pairs <- list(
   "Tnf_Tnfr" = c("Tnf", "Tnfrsf1a", "Tnfrsf1b")
 )
 
-# Panel E: 配体-受体热图
-cat("Panel E: LR基因表达热图...\n")
+# Panel E: Ligand-Receptor heatmap
+cat("Panel E: LR gene Expression Heatmap...\n")
 
 lr_heatmap_data <- data.frame()
 for(lr_name in names(key_lr_pairs)) {
@@ -2298,8 +2300,8 @@ for(lr_name in names(key_lr_pairs)) {
             
             lr_heatmap_data <- rbind(lr_heatmap_data, data.frame(
               LR_pair = lr_name,
-              Gene = gene,
-              Gene_type = ifelse(gene %in% c("Tgfbr1", "Tgfbr2", "Pdgfra", "Pdgfrb", 
+              gene = gene,
+              gene_type = ifelse(gene %in% c("Tgfbr1", "Tgfbr2", "Pdgfra", "Pdgfrb", 
                                              "Ccr2", "Cxcr4", "Met", "Kdr", "Flt1",
                                              "Cd44", "Il6r", "Tnfrsf1a", "Tnfrsf1b"), 
                                  "Receptor", "Ligand"),
@@ -2320,7 +2322,7 @@ if(nrow(lr_heatmap_data) > 0) {
     geom_text(aes(label = sprintf("%.1f", Mean_expr)), size = 2.5) +
     scale_fill_gradientn(colors = c("white", "yellow", "orange", "red", "darkred"),
                          name = "Mean\nExpr") +
-    facet_wrap(~Gene_type, ncol = 1, scales = "free_y") +
+    facet_wrap(~gene_type, ncol = 1, scales = "free_y") +
     labs(x = "", y = "", title = "E. Key LR Pairs Expression") +
     theme_journal +
     theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
@@ -2332,8 +2334,8 @@ if(nrow(lr_heatmap_data) > 0) {
     labs(title="E. Key LR Pairs") + theme_void() + theme_journal
 }
 
-# Panel F: 通讯强度网络图
-cat("Panel F: 通讯网络数据...\n")
+# Panel F: Communication Strength Network
+cat("Panel F: Communication Network Data...\n")
 
 if(exists("hep_hsc_ccl4") && nrow(hep_hsc_ccl4) > 0) {
   network_df <- hep_hsc_ccl4 %>%
@@ -2361,7 +2363,7 @@ if(exists("hep_hsc_ccl4") && nrow(hep_hsc_ccl4) > 0) {
 } else {
   if(nrow(lr_heatmap_data) > 0) {
     inferred_comm <- lr_heatmap_data %>%
-      filter(Gene_type == "Ligand") %>%
+      filter(gene_type == "Ligand") %>%
       group_by(LR_pair, CellType) %>%
       summarise(avg_expr = mean(Mean_expr, na.rm = TRUE), .groups = "drop")
     
@@ -2379,8 +2381,8 @@ if(exists("hep_hsc_ccl4") && nrow(hep_hsc_ccl4) > 0) {
   }
 }
 
-# Panel G: 空间分布图
-cat("Panel G: 空间分布...\n")
+# Panel G: Spatial Distribution Map
+cat("Panel G: Spatial Distribution...\n")
 
 if("celltype_reannotated" %in% colnames(high_quality_cells@meta.data)) {
   high_quality_cells$comm_type <- ifelse(
@@ -2412,19 +2414,19 @@ if("celltype_reannotated" %in% colnames(high_quality_cells@meta.data)) {
                              label="Cell type data missing") + 
     labs(title="G. Spatial Map") + theme_void() + theme_journal
 }
-# Panel H: 全局网络统计(完全修复版)
-cat("Panel H: 全局网络统计...\n")
+# Panel H: Global Network Statistics (Fully Fixed)
+cat("Panel H: Global Network Statistics...\n")
 
 if(exists("df_comm_ccl4") && !is.null(df_comm_ccl4) && nrow(df_comm_ccl4) > 0) {
   
-  # 清理数据
+  # Clean data
   df_comm_clean <- df_comm_ccl4 %>%
     dplyr::filter(!is.na(source), !is.na(target), !is.na(prob))
   
-  cat(sprintf("  清理后通讯对: %d\n", nrow(df_comm_clean)))
+  cat(sprintf("  CleanafterCommunication Pairs: %d\n", nrow(df_comm_clean)))
   
   if(nrow(df_comm_clean) > 0) {
-    # 计算out-degree - 关键修复: 使用dplyr::前缀，并在summarise后立即转换为data.frame
+    # Calculate out-degree - Key Fix: Use dplyr:: prefix, and immediately convert to data.frame after summarise
     out_degree <- df_comm_clean %>%
       dplyr::group_by(source) %>%
       dplyr::summarise(
@@ -2434,11 +2436,11 @@ if(exists("df_comm_ccl4") && !is.null(df_comm_ccl4) && nrow(df_comm_ccl4) > 0) {
       ) %>%
       dplyr::ungroup()
     
-    # 关键修复: 显式转换为普通data.frame，避免类属性问题
+    # Key Fix: Explicitly convert to plain data.frame, Avoid class attribute issues
     out_degree <- as.data.frame(out_degree)
     names(out_degree) <- c("cell_type", "out_strength", "n_targets")
     
-    # 计算in-degree
+    # Calculatein-degree
     in_degree <- df_comm_clean %>%
       dplyr::group_by(target) %>%
       dplyr::summarise(
@@ -2448,29 +2450,29 @@ if(exists("df_comm_ccl4") && !is.null(df_comm_ccl4) && nrow(df_comm_ccl4) > 0) {
       ) %>%
       dplyr::ungroup()
     
-    # 关键修复: 显式转换为普通data.frame
+    # Key Fix: Explicitly convert to plain data.frame
     in_degree <- as.data.frame(in_degree)
     names(in_degree) <- c("cell_type", "in_strength", "n_sources")
     
-    cat(sprintf("  Out-degree细胞数: %d, In-degree细胞数: %d\n", 
+    cat(sprintf("  Out-degreeCellnumber: %d, In-degreeCellnumber: %d\n", 
                 nrow(out_degree), nrow(in_degree)))
     
-    # 使用base R merge避免dplyr join问题
+    # Use base R merge to avoid dplyr join issues
     centrality_df <- merge(out_degree, in_degree, by = "cell_type", all = TRUE)
     
-    # 处理NA
+    # TreatmentNA
     centrality_df$out_strength[is.na(centrality_df$out_strength)] <- 0
     centrality_df$in_strength[is.na(centrality_df$in_strength)] <- 0
     centrality_df$total_strength <- centrality_df$out_strength + centrality_df$in_strength
     
-    cat(sprintf("  合并后数据行数: %d\n", nrow(centrality_df)))
+    cat(sprintf("  MergeafternumberdataRownumber: %d\n", nrow(centrality_df)))
     
     if(nrow(centrality_df) > 0) {
-      # 排序并取前10
+      # Sortandtaketop10
       ord_idx <- order(centrality_df$total_strength, decreasing = TRUE)
       centrality_top <- centrality_df[ord_idx[1:min(10, nrow(centrality_df))], ]
       
-      # 转换为因子
+      # Convert to factor
       centrality_top$cell_type <- factor(
         centrality_top$cell_type, 
         levels = centrality_top$cell_type[order(centrality_top$total_strength)]
@@ -2490,7 +2492,7 @@ if(exists("df_comm_ccl4") && !is.null(df_comm_ccl4) && nrow(df_comm_ccl4) > 0) {
                        legend.title = ggplot2::element_blank(),
                        axis.text.y = ggplot2::element_text(size = 9))
       
-      cat("  ✓ Panel H绘制成功\n")
+      cat("  ✓ Panel HPlotsuccessfully\n")
     } else {
       p4h <- ggplot2::ggplot() + 
         ggplot2::annotate("text", x=0.5, y=0.5, label="No valid centrality data") + 
@@ -2504,7 +2506,7 @@ if(exists("df_comm_ccl4") && !is.null(df_comm_ccl4) && nrow(df_comm_ccl4) > 0) {
       ggplot2::theme_void() + theme_journal
   }
 } else {
-  # 备用
+  # Backup
   cell_counts <- as.data.frame(table(high_quality_cells$celltype_reannotated))
   colnames(cell_counts) <- c("CellType", "Count")
   cell_counts <- cell_counts[!is.na(cell_counts$CellType), ]
@@ -2516,22 +2518,22 @@ if(exists("df_comm_ccl4") && !is.null(df_comm_ccl4) && nrow(df_comm_ccl4) > 0) {
     theme_journal
 }
 
-cat("✓ Panel E-H完成\n")
+cat("✓ Panel E-Hcompleted\n")
 
-# ==================== 组合Figure 4(2行×4列布局)====================
-cat("\n组合 Figure 4 (2行×4列布局)...\n")
+# ==================== Assemble Figure 4(2-Row × 4-Column Layout)====================
+cat("\nAssemble Figure 4 (2-Row × 4-Column Layout)...\n")
 
 library(grid)
 library(gridExtra)
 library(patchwork)
 
-# 组合第1行
+# Assemble Row 1
 fig4_row1 <- wrap_plots(p4a, p4b, p4c, p4d, ncol = 4)
 
-# 组合第2行
+# Assemble Row 2
 fig4_row2 <- wrap_plots(p4e, p4f, p4g, p4h, ncol = 4, widths = c(1, 1, 0.8, 0.8))
 
-# 完整组合
+# Complete assembly
 fig4_complete <- fig4_row1 / fig4_row2 +
   plot_layout(heights = c(1, 1)) +
   plot_annotation(
@@ -2544,42 +2546,42 @@ fig4_complete <- fig4_row1 / fig4_row2 +
   ) &
   theme(plot.tag = element_text(face = "bold", size = 12))
 
-# 保存
+# Save
 ggsave(file.path(figures.dir, "Figure4_Hepatocyte_HSC_Communication.tiff"), 
        fig4_complete, width = 16, height = 10, dpi = 300, compression = "lzw")
 
 ggsave(file.path(figures.dir, "Figure4_Hepatocyte_HSC_Communication.pdf"), 
        fig4_complete, width = 16, height = 10, device = cairo_pdf)
 
-cat("\n✓ Figure 4 Complete! (原Figure 3，通讯分析，8 panels A-H)\n")
-cat("关键改进:\n")
-cat("  1. 完整的extract_communication_safe()函数\n")
-cat("  2. 完整的Panel E-H代码\n")
-cat("  3. 自动检测CellChat对象结构\n")
-cat("  4. 多重降级策略\n")
-cat("  5. 正确的2行×4列布局\n")
+cat("\n✓ Figure 4 Complete! (Original Figure 3, Communication Analysis, 8 panels A-H)\n")
+cat("Key improvements:\n")
+cat("  1. Complete extract_communication_safe() function\n")
+cat("  2. Complete Panel E-H code\n")
+cat("  3. Auto-detect CellChat object structure\n")
+cat("  4. Multiple fallback strategies\n")
+cat("  5. correctly2-Row × 4-Column Layout\n")
 
-# ==================== 步骤12: Figure 5 - 治疗靶点优先级（新增）====================
+# ==================== Step 12: Figure 5 - Therapeutic Target Priority（Newly added）====================
 cat("\n")
 cat(paste(rep("=", 70), collapse = ""), "\n")
 cat("              Figure 5: Therapeutic Target Prioritization\n")
 cat(paste(rep("=", 70), collapse = ""), "\n")
 
-# 加载必要包
+# Loading Required Packages
 if(!requireNamespace("ggrepel", quietly = TRUE)) install.packages("ggrepel")
 library(ggrepel)
 
-# 确保hsc_deg存在
+# Ensure hsc_deg exists
 if(!exists("hsc_deg")) {
   deg_file <- file.path(tables.dir, "Table_DEG_HSC_Act_vs_Qui_CCl4.csv")
   if(file.exists(deg_file)) {
     hsc_deg <- read.csv(deg_file)
   } else {
-    stop("错误: 未找到HSC DEG结果")
+    stop("Error: Not foundHSC DEG results")
   }
 }
 
-# 统一主题
+# Unified theme
 fig5_theme <- theme_bw(base_size = 11) +
   theme(
     plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
@@ -2588,17 +2590,17 @@ fig5_theme <- theme_bw(base_size = 11) +
     panel.grid.minor = element_blank()
   )
 
-# ==================== Panel A: 治疗靶点优先级排序 ====================
-cat("Panel A: 治疗靶点优先级排序\n")
+# ==================== Panel A: Therapeutic Target Priority Ranking ====================
+cat("Panel A: Therapeutic Target Priority Ranking\n")
 
-# 定义靶点及其可药性评分
+# Define targets and their druggability scores
 target_info <- data.frame(
   gene = c("Acta2", "Col1a1", "Lox", "Timp1", "Cthrc1", "Postn", "Vim", "Col1a2", "Col3a1"),
   druggability = c("★★★", "★★★", "★★☆", "★★☆", "★☆☆", "★☆☆", "★☆☆", "★★★", "★★☆"),
   stringsAsFactors = FALSE
 )
 
-# 合并DEG数据
+# Merge DEG data
 target_data <- hsc_deg %>%
   filter(gene %in% target_info$gene) %>%
   left_join(target_info, by = "gene") %>%
@@ -2615,7 +2617,7 @@ target_data <- hsc_deg %>%
   ) %>%
   arrange(desc(priority_score))
 
-# 绘制优先级条形图
+# Plot priority bar chart
 p_5a <- ggplot(target_data, aes(x = reorder(gene, priority_score), y = avg_log2FC)) +
   geom_bar(aes(fill = druggability), stat = "identity", alpha = 0.9, width = 0.7) +
   geom_text(aes(label = significance), hjust = -0.2, size = 3.5, color = "black") +
@@ -2629,10 +2631,10 @@ p_5a <- ggplot(target_data, aes(x = reorder(gene, priority_score), y = avg_log2F
   fig5_theme +
   theme(legend.position = "right")
 
-# ==================== Panel B: 机制总结示意图 ====================
-cat("Panel B: Stress-Communication-Activation轴示意图\n")
+# ==================== Panel B: Mechanism Summary Diagram ====================
+cat("Panel B: Stress-Communication-Activation Axis Diagram\n")
 
-# 创建机制示意图（使用ggplot绘制流程图）
+# Create mechanism diagram（Use ggplot to plot flow chart）
 mechanism_data <- data.frame(
   x = c(1, 2, 3, 4, 2.5, 3.5),
   y = c(2, 2, 2, 2, 1, 1),
@@ -2649,22 +2651,22 @@ arrow_data <- data.frame(
 )
 
 p_5b <- ggplot() +
-  # 绘制节点
+  # Plot nodes
   geom_point(data = mechanism_data, aes(x = x, y = y, size = size), 
              color = c("#3498DB", "#E74C3C", "#F39C12", "#9B59B6", "#2ECC71", "#E74C3C"), 
              alpha = 0.8) +
-  # 绘制箭头
+  # Plot arrows
   geom_segment(data = arrow_data, aes(x = x, xend = xend, y = y, yend = yend),
                arrow = arrow(length = unit(0.3, "cm")), linewidth = 1, color = "grey30") +
-  # 添加标签
+  # Add labels
   geom_text(data = mechanism_data, aes(x = x, y = y, label = label), 
             size = 3, fontface = "bold", color = "white") +
-  # 添加信号标注
+  # Add signal annotations
   annotate("text", x = 2.5, y = 0.6, label = "PDGF/TGF-β\nSignaling", 
            size = 3, color = "#2ECC71", fontface = "bold") +
   annotate("text", x = 3.5, y = 0.6, label = "Oxidative\nStress", 
            size = 3, color = "#E74C3C", fontface = "bold") +
-  # 设置坐标轴
+  # Set axes
   scale_x_continuous(limits = c(0.5, 4.5), expand = c(0, 0)) +
   scale_y_continuous(limits = c(0.3, 2.5), expand = c(0, 0)) +
   scale_size_continuous(range = c(15, 25)) +
@@ -2675,8 +2677,8 @@ p_5b <- ggplot() +
     legend.position = "none"
   )
 
-# ==================== 组合Figure 5 ====================
-cat("组合Figure 5...\n")
+# ==================== Assemble Figure 5 ====================
+cat("Assemble Figure 5...\n")
 
 fig5_final <- p_5a + p_5b + 
   plot_layout(ncol = 2, widths = c(1.2, 1)) +
@@ -2691,7 +2693,7 @@ fig5_final <- p_5a + p_5b +
   ) &
   theme(plot.tag = element_text(face = "bold", size = 12))
 
-# 保存
+# Save
 ggsave(file.path(figures.dir, "Figure5_Therapeutic_Targets.tiff"), 
        fig5_final, width = 14, height = 7, dpi = 300, compression = "lzw")
 
@@ -2701,10 +2703,8 @@ ggsave(file.path(figures.dir, "Figure5_Therapeutic_Targets.pdf"),
 ggsave(file.path(figures.dir, "Figure5_Therapeutic_Targets.png"), 
        fig5_final, width = 14, height = 7, dpi = 300)
 
-cat("\n✓ Figure 5 Complete! (新增，治疗靶点优先级，2 panels)\n")
-cat("输出文件:\n")
+cat("\n✓ Figure 5 Complete! (Newly added, Therapeutic Target Priority, 2 panels)\n")
+cat("Outputfile:\n")
 cat("  - Figure5_Therapeutic_Targets.tiff\n")
 cat("  - Figure5_Therapeutic_Targets.pdf\n")
 cat("  - Figure5_Therapeutic_Targets.png\n")
-
-
