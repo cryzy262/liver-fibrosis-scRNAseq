@@ -225,17 +225,17 @@ if(!"celltype" %in% colnames(high_quality_cells@meta.data) ||
   }
   
   # Extended marker list
-  liver_markers <- list(
-    "Hepatocyte" = c("Alb", "Ttr", "Ass1", "Serpina1a", "Cyp2e1"),
-    "HSC" = c("Lrat", "Des", "Vim", "Pdgfrb", "Acta2", "Col1a1",  "Gfap", "S100a4", "Thy1"),
+   liver_markers <- list(
+    "Hepatocyte" = c("Alb", "Ttr", "Apoa1", "Cyp3a11", "Fabp1", "Ass1", "Serpina1a", "Cyp2e1"),
+    "HSC" = c("Lrat", "Des", "Vim", "Pdgfrb", "Acta2", "Col1a1", "Col1a2", "Dcn", "Gfap", "S100a4", "Thy1"),
     "Endothelial" = c("Pecam1", "Cdh5", "Vwf", "Eng", "Stab2", "Kdr", "Tek", "Cldn5", "Flt1", "Nrp2"),
-    "Kupffer" = c("Adgre1", "Cd68", "Cd163", "Marco", "Cd5l", "Vsig4"),
-    "Monocyte" = c("Ly6c2",  "Fn1", "Csf1r"),
-    "Cholangiocyte" = c("Krt19","Epcam", "Anxa4", "Krt8", "Cftr"),
-    "NK_T" = c("Cd3e", "Nkg7", , "Klrb1c"),
+    "Kupffer" = c("Adgre1", "Cd68", "Cd163", "Marco", "Clec4f", "Mrc1", "Timd4", "Cd5l", "Vsig4"),
+    "Monocyte" = c("Ly6c2", "Ccr2", "Cd14", "Fcgr3", "Plac8", "Itgam", "Fn1", "Csf1r"),
+    "Cholangiocyte" = c("Krt19", "Krt7", "Sox9", "Epcam", "Anxa4", "Krt8", "Cftr"),
+    "NK_T" = c("Cd3e", "Nkg7", "Gzma", "Ccl5", "Trac", "Cd3d", "Cd8a", "Klrb1c"),
     "B_cell" = c("Cd79a", "Cd79b", "Ms4a1", "Cd19", "Ighm", "Cd74", "Ebf1"),
     "Plasma_cell" = c("Jchain", "Mzb1", "Igkc", "Ighg1", "Igha1", "Sdc1"),
-    "Neutrophil" = c("S100a8", "S100a9", "G0s2",  "Csf3r", "Lcn2")
+    "Neutrophil" = c("S100a8", "S100a9", "G0s2", "Retnlg", "Csf3r", "Lcn2")
   )
   
   # Computing module scores
